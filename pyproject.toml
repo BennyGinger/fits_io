@@ -7,7 +7,11 @@ authors = [
     { name = "Benoit Roux", email = "benoit.roux@gmail.com" }
 ]
 requires-python = ">=3.12, <3.13"
-dependencies = []
+dependencies = [
+    "imagecodecs>=2026.1.14",
+    "nd2>=0.11.2",
+    "tifffile>=2026.1.14",
+]
 
 [project.scripts]
 fits-io = "fits_io:main"

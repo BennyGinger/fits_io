@@ -178,13 +178,15 @@ def get_metadata(img_path: Path, active_channel_list: list=None, full_channel_li
 if __name__ == '__main__':
     from time import time
     from pathlib import Path
-    from tifffile import imwrite
+    from tifffile import imwrite, imread
     
     # Test
     t1 = time()
-    img_path = Path('/home/ben/Docker_mount/Test_images/nd2/Run2/c2z25t23v1_nd2.nd2')
-    with ND2File(img_path) as nd_obj:
-        print({**nd_obj.sizes})
+    img_path = Path('/home/ben/Docker_mount/Test_images/tiff/Run2/c2z25t23v1_tif.tif')
+    img = imread(img_path)
+    imwrite('/home/ben/Docker_mount/Test_images/tiff/Run2/test.tif',
+            img,
+            compression='zstd',)
     t2 = time()
     print(f"Time to process: {round(t2-t1,ndigits=3)} sec\n")
 
