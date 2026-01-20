@@ -1,192 +1,193 @@
-from __future__ import annotations
-from os import sep, mkdir
-from os.path import isdir
+from dataclasses import dataclass, field
 from pathlib import Path
-import warnings
+from typing import Any, Mapping, Sequence, TypeAlias
+import json
 
-from tifffile import TiffFile
-from nd2 import ND2File
+from numpy.typing import NDArray
+import numpy as np
 
-def get_tif_meta(img_path: Path) -> dict:
-    tiff_meta = {}
-    # Open tif and read meta
-    with TiffFile(img_path) as tif:
-        imagej_meta = tif.imagej_metadata
-        imagej_meta['axes'] = tif.series[0].axes
-        for page in tif.pages: # Add additional meta
-            for tag in page.tags:
-                if tag.name in ['ImageWidth','ImageLength',]:
-                    imagej_meta[tag.name] = tag.value
-                if tag.name in ['XResolution','YResolution']:
-                    imagej_meta[tag.name] = tag.value[0]/tag.value[1]
+from fits_io.image_reader import get_reader
 
-    if 'frames' not in imagej_meta: imagej_meta['frames'] = 1
 
-    if 'channels' not in imagej_meta: imagej_meta['channels'] = 1
+TiffTag: TypeAlias = tuple[
+    int,    # tag id
+    str,    # TIFF dtype
+    int,    # count (0 = infer)
+    Any,    # value
+    bool,   # writeonce
+]
 
-    if 'slices' not in imagej_meta: imagej_meta['slices'] = 1
+ExtraTags: TypeAlias = Sequence[TiffTag]
 
-    if 'finterval' not in imagej_meta: 
-        imagej_meta['finterval'] = None
-        print("Warning: No frame interval found in metadata. Defaulting to None")
-    else:
-        imagej_meta['finterval'] = int(imagej_meta['finterval'])
+PIPELINE_TAG = 65000  # private tag to save custom metadata in tiff files
 
-    original_keys = ['ImageWidth','ImageLength','frames','channels','slices','axes','finterval']
-    new_keys = ['img_width','img_length','n_frames','full_n_channels','n_slices','axes','interval_sec']
 
-    # Rename meta
-    for i, key in enumerate(original_keys):
-        tiff_meta[new_keys[i]] = imagej_meta[key]
+LABEL_TO_COLOR = {
+    "green": 'green',
+    "gfp": 'green',
+    "egfp": 'green',
+    "fitc": 'green',
+    "red": 'red',
+    "mcherry": 'red',
+    "tritc": 'red',
+    "rfp": 'red',
+    "bfp": 'blue',
+    "dapi": 'blue',
+}
 
-    # Uniformize meta
-    tiff_meta['n_series'] = 1
-    tiff_meta['um_per_pixel'] = calculate_um_per_pixel(imagej_meta)
-    tiff_meta['file_type'] = '.tif'
-    return tiff_meta
 
-def calculate_um_per_pixel(meta_dict: dict) -> tuple[float,float] | None:
-    """Calculate the um per pixel from the metadata of a tiff file. Output axes = (x,y)"""
-    # Check if resolution was extracted
-    if 'XResolution' not in meta_dict or 'YResolution' not in meta_dict:
-        print("Warning: Resolution not found in metadata. Defaulting to None")
-        return None
+@dataclass
+class ImageMeta:
+    axes: str
+    finterval: float | None
     
-    # Calculate um per pixel
-    x_um_per_pix = round(1/meta_dict['XResolution'],ndigits=3)
-    y_um_per_pix = round(1/meta_dict['YResolution'],ndigits=3)
-    return x_um_per_pix,y_um_per_pix
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any]=  {'axes': self.axes}
+        if self.finterval is not None:
+            d['finterval'] = self.finterval
+        return d
 
-def get_ND2_meta(img_path: Path)-> dict:
-    # Get ND2 img metadata
-    with ND2File(img_path) as nd_obj:
-        nd2meta = {**nd_obj.sizes}
-        # Add missing keys and get axes
-        nd2meta['axes'] = 'TPZCYX'
-        if 'T' not in nd2meta:
-            nd2meta['T'] = 1
-            nd2meta['axes'] = nd2meta['axes'].replace('T','')
-        if 'C' not in nd2meta:
-            nd2meta['C'] = 1
-            nd2meta['axes'] = nd2meta['axes'].replace('C','')  
-        if 'Z' not in nd2meta:
-            nd2meta['Z'] = 1
-            nd2meta['axes'] = nd2meta['axes'].replace('Z','')   
-        if 'P' not in nd2meta:
-            nd2meta['P'] = 1
-            nd2meta['axes'] = nd2meta['axes'].replace('P','')
 
-        # Rename meta
-        original_keys = ['C', 'Z', 'T', 'P', 'X', 'Y']
-        new_keys = ['full_n_channels', 'n_slices', 'n_frames', 'n_series', 'img_width', 'img_length']
-        for i, key in enumerate(original_keys):
-            nd2meta[new_keys[i]] = nd2meta.pop(key)
+class ResolutionMeta: 
+    def __init__(self, resolution: tuple[float, float]) -> None:
+        self._resolution = resolution
+        self.unit = 'um'
+    
+    @property
+    def resolution(self) -> tuple[float, float] | None:
+        if self._resolution == (1., 1.):
+            return None
+        return self._resolution
 
-        # Uniformize meta
-        nd2meta['um_per_pixel'] = nd_obj.metadata.channels[0].volume.axesCalibration[:2]
-        if nd2meta['n_frames']>1:
-            if nd_obj.experiment[0].type == 'TimeLoop': #for normal timelapse experiments
-                nd2meta['interval_sec'] = nd_obj.experiment[0].parameters.periodMs/1000
-            elif nd_obj.experiment[0].type == 'NETimeLoop': #for ND2 Merged Experiments
-                nd2meta['interval_sec'] = nd_obj.experiment[0].parameters.periods[0].periodMs/1000
+
+def make_color_lut(color: str) -> NDArray[np.uint8]:
+    """Return ImageJ-style LUT: shape (3, 256), uint8."""
+    lut = np.zeros((3, 256), dtype=np.uint8)
+    channel_index = {"red": 0, "green": 1, "blue": 2}[color]
+    lut[channel_index] = np.arange(256, dtype=np.uint8)
+    return lut   
+
+
+@dataclass
+class ChannelMeta:
+    channel_number: int
+    labels: Sequence[str] | None = None
+    mode: str = field(init=False)
+    luts: list[NDArray[np.uint8]] | None = field(init=False)
+    
+    def __post_init__(self):
+        if self.labels is None:
+            self.mode, self.luts = 'grayscale', None
+            self.labels = [f"C{i+1}" for i in range(self.channel_number)]
+            return
+        
+        if self.labels is not None and len(self.labels) != self.channel_number:
+            raise ValueError(f"Expected {self.channel_number} labels, got {len(self.labels)}")
+        
+        colors = [LABEL_TO_COLOR.get(lbl.lower(), None) for lbl in self.labels]
+        VALID = {"red","green","blue"}
+        if any(c not in VALID for c in colors):
+            self.mode, self.luts = 'grayscale', None
         else:
-            nd2meta['interval_sec'] = None
-        nd2meta['file_type'] = '.nd2'
-    return nd2meta
+            self.mode, self.luts = 'color', [make_color_lut(c) for c in colors if c is not None]
+    
+            
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any]=  {}
+        d['Labels'] = self.labels
+        d['mode'] = self.mode
+        if self.luts is not None:
+            d['LUTs'] = self.luts
+        return d
+    
+    
+@dataclass
+class ImageJMetadata:
+    metadata: dict[str, Any] = field(default_factory=dict)
+    resolution: tuple[float, float] | None = None
+    extratags: ExtraTags | None = None
 
-def create_exp_folder(meta_dict: dict) -> dict:
-    meta_dict['exp_path_list'] = []
-    for serie in range(meta_dict['n_series']):
-        # Create subfolder in parent folder to save the image sequence with a serie's tag
-        path_split = meta_dict['img_path'].split(sep)
-        path_split[-1] = path_split[-1].split('.')[0]+f"_s{serie+1}"
-        exp_path =  sep.join(path_split)
-        if not isdir(exp_path):
-            mkdir(exp_path)
-        meta_dict['exp_path_list'].append(exp_path)
-    return meta_dict
-
-def update_channel_names(meta_dict: dict, full_channel_list: list=None, active_channel_list: list=None) -> dict:
-    if not full_channel_list:
-        warnings.warn(f"\n---- Warning: No exp channels given. All channels will be automatically named ----")
-        meta_dict['full_channel_list'] = meta_dict['active_channel_list'] = [f'C{i+1}' for i in range(meta_dict['full_n_channels'])]
-        return meta_dict
+def build_imagej_metadata(img_path: Path, channel_labels: str | Sequence[str] | None = None, custom_metadata: Mapping[str, Any] | None = None) -> ImageJMetadata:
+    """
+    Build ImageJ-compatible metadata for saving TIFF files.
     
-    if len(full_channel_list) != meta_dict['full_n_channels']:
-        raise ValueError(f"Number of channels in the image file ({meta_dict['full_n_channels']}) is different from the number of channels given ({len(full_channel_list)})")
+    Args:
+        img_path: Path to the image file to read metadata from.
+        channel_labels: Optional; either a single string label or a sequence of labels for each channel. If None, default labels will be used.
+        custom_metadata: Optional mapping of custom metadata to include under the private tag.
     
-    # Format the channel names and add them to the meta
-    meta_dict['full_channel_list'] = [format_label_name(label) for label in full_channel_list]
+    Returns:
+        ImageJMetadata object containing metadata, resolution, and extra tags.
+    """
     
-    if not active_channel_list:
-        meta_dict['active_channel_list'] = meta_dict['full_channel_list']
-        return meta_dict
+    reader = get_reader(img_path)
     
-    # Check if the active channels are in the full channel list
-    for channel in active_channel_list:
-        if channel not in full_channel_list:
-            raise ValueError(f"Channel {channel} not found in the full channel list")
+    img_meta = ImageMeta(
+        axes=reader.axes,
+        finterval=reader.interval)
     
-    # Format the channel names and add them to the meta
-    meta_dict['active_channel_list'] = [format_label_name(label) for label in active_channel_list]
-    return meta_dict
-
-def format_label_name(label: str) -> str:
-    """Format the channel label name to be used in the pipeline. Must NOT contain any '_'."""
-    return label.replace('_','')
-
-# # # # # # # # main functions # # # # # # # # # 
-def get_metadata(img_path: Path, active_channel_list: list=None, full_channel_list: list=None)-> dict:
-    """Gather metadata from all image files (.nd2 and/or .tif) and is attributed to its own experiment folder"""
+    if isinstance(channel_labels, str):
+        channel_labels = [channel_labels]
+    channel_meta = ChannelMeta(
+        channel_number=reader.channel_number,
+        labels=channel_labels)
     
-    print(f"\n-> Extracting metadata from \033[94m{img_path}\033[0m")
-    if img_path.endswith('.nd2'):
-        meta_dict = get_ND2_meta(img_path)
-    elif img_path.endswith(('.tif','.tiff')):
-        meta_dict = get_tif_meta(img_path)
-    else:
-        raise ValueError('Image format not supported, please use .nd2 or .tif/.tiff')
-    # meta_dict = uniformize_meta(meta_dict)
+    metadata_dict = img_meta.to_dict()
+    metadata_dict.update(channel_meta.to_dict())
     
-    meta_dict['img_path'] = img_path
+    resolution_meta = ResolutionMeta(reader.resolution)
+    if resolution_meta.resolution is not None:
+        metadata_dict['unit'] = resolution_meta.unit
     
-    meta_dict = create_exp_folder(meta_dict)
+    extratags: ExtraTags | None = None
+    payload = {}
+    if resolution_meta.resolution is not None:
+        payload['resolution'] = resolution_meta.resolution
+    if custom_metadata is not None:
+        payload.update(custom_metadata)
+    if payload:
+        extratags = [(PIPELINE_TAG, "s", 0, json.dumps(payload, ensure_ascii=False), True)]
     
-    # Add channel data
-    meta_dict = update_channel_names(meta_dict,full_channel_list,active_channel_list)
-    return meta_dict
-    
-# Final output: 
-# {'active_channel_list': ['C1', 'C2'],
-#  'axes': 'TZCYX',
-#  'exp_path_list': ['/home/Test_images/nd2/Run2/c2z25t23v1_nd2_s1'], return a list pf path based on the number of series
-#  'file_type': '.nd2',
-#  'full_channel_list': ['C1', 'C2'],
-#  'full_n_channels': 2,
-#  'img_length': 512,
-#  'img_path': '/home/Test_images/nd2/Run2/c2z25t23v1_nd2.nd2',
-#  'img_width': 512,
-#  'interval_sec': 11,
-#  'level_0_tag': 'Run2',
-#  'level_1_tag': 'nd2',
-#  'n_frames': 23,
-#  'n_series': 1,
-#  'n_slices': 25,
-#  'um_per_pixel': (0.322, 0.322)}
-    
+    return ImageJMetadata(
+        metadata=metadata_dict,
+        resolution=resolution_meta.resolution,
+        extratags=extratags)
+                          
 
 if __name__ == '__main__':
     from time import time
-    from pathlib import Path
-    from tifffile import imwrite, imread
+    from tifffile import imread, imwrite
+    
+    
+    payload = json.dumps({
+                'resolution': (1/0.3223335, 1/0.3223335),
+                'Some_other_metadata': {'key1':'value1',
+                                        'key2':'value2'}
+            })
     
     # Test
     t1 = time()
-    img_path = Path('/home/ben/Docker_mount/Test_images/tiff/Run2/c2z25t23v1_tif.tif')
+    img_path = Path('/home/ben/Docker_mount/Test_images/tiff/Run2/simple.tif')
+    save_path = Path('/home/ben/Docker_mount/Test_images/tiff/Run2/test.tif')
     img = imread(img_path)
-    imwrite('/home/ben/Docker_mount/Test_images/tiff/Run2/test.tif',
+    imwrite(save_path,
             img,
-            compression='zstd',)
+            imagej=True,
+            metadata={
+                    'axes':'TZCYX',
+                    'finterval':11,
+                    'Labels': ["GFP", "mCherry"],
+                    'mode':'color',   
+                    'LUTs': [make_color_lut("green"), make_color_lut("red")],
+                    "unit": "um"
+                },
+            resolution=(1/0.3223335, 1/0.3223335),
+            predictor=2,
+            extratags=[(PIPELINE_TAG, "s", 0, payload, True)],
+            compression='zlib',
+    )
+    
+    
     t2 = time()
     print(f"Time to process: {round(t2-t1,ndigits=3)} sec\n")
 
