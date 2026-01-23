@@ -6,7 +6,7 @@ import json
 from numpy.typing import NDArray
 import numpy as np
 
-from fits_io.image_reader import get_reader
+from fits_io.image_reader import ImageReader
 
 
 TiffTag: TypeAlias = tuple[
@@ -20,7 +20,6 @@ TiffTag: TypeAlias = tuple[
 ExtraTags: TypeAlias = Sequence[TiffTag]
 
 PIPELINE_TAG = 65000  # private tag to save custom metadata in tiff files
-
 
 LABEL_TO_COLOR = {
     "green": 'green',
@@ -37,7 +36,7 @@ LABEL_TO_COLOR = {
 
 
 @dataclass
-class ImageMeta:
+class StackMeta:
     axes: str
     finterval: float | None
     
@@ -68,7 +67,7 @@ def make_color_lut(color: str) -> NDArray[np.uint8]:
     return lut   
 
 
-@dataclass
+@dataclass(slots=True)
 class ChannelMeta:
     channel_number: int
     labels: Sequence[str] | None = None
@@ -101,41 +100,44 @@ class ChannelMeta:
         return d
     
     
-@dataclass
-class ImageJMetadata:
-    metadata: dict[str, Any] = field(default_factory=dict)
+@dataclass(slots=True)
+class TiffMetadata:
+    """Container for ImageJ-compatible TIFF metadata."""
+    
+    imagej_meta: dict[str, Any] = field(default_factory=dict)
     resolution: tuple[float, float] | None = None
     extratags: ExtraTags | None = None
 
-def build_imagej_metadata(img_path: Path, channel_labels: str | Sequence[str] | None = None, custom_metadata: Mapping[str, Any] | None = None) -> ImageJMetadata:
+
+
+
+def build_imagej_metadata(img_reader: ImageReader, channel_labels: str | Sequence[str] | None = None, custom_metadata: Mapping[str, Any] | None = None) -> TiffMetadata:
     """
     Build ImageJ-compatible metadata for saving TIFF files.
     
     Args:
-        img_path: Path to the image file to read metadata from.
+        img_reader: An ImageReader instance to read metadata from.
         channel_labels: Optional; either a single string label or a sequence of labels for each channel. If None, default labels will be used.
         custom_metadata: Optional mapping of custom metadata to include under the private tag.
     
     Returns:
-        ImageJMetadata object containing metadata, resolution, and extra tags.
+        TiffMetadata object containing metadata, resolution, and extra tags.
     """
     
-    reader = get_reader(img_path)
-    
-    img_meta = ImageMeta(
-        axes=reader.axes,
-        finterval=reader.interval)
+    img_meta = StackMeta(
+        axes=img_reader.axes,
+        finterval=img_reader.interval)
     
     if isinstance(channel_labels, str):
         channel_labels = [channel_labels]
     channel_meta = ChannelMeta(
-        channel_number=reader.channel_number,
+        channel_number=img_reader.channel_number,
         labels=channel_labels)
     
     metadata_dict = img_meta.to_dict()
     metadata_dict.update(channel_meta.to_dict())
     
-    resolution_meta = ResolutionMeta(reader.resolution)
+    resolution_meta = ResolutionMeta(img_reader.resolution)
     if resolution_meta.resolution is not None:
         metadata_dict['unit'] = resolution_meta.unit
     
@@ -148,8 +150,8 @@ def build_imagej_metadata(img_path: Path, channel_labels: str | Sequence[str] | 
     if payload:
         extratags = [(PIPELINE_TAG, "s", 0, json.dumps(payload, ensure_ascii=False), True)]
     
-    return ImageJMetadata(
-        metadata=metadata_dict,
+    return TiffMetadata(
+        imagej_meta=metadata_dict,
         resolution=resolution_meta.resolution,
         extratags=extratags)
                           

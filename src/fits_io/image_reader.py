@@ -1,11 +1,13 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Type, cast
+from typing import Any, Mapping, Type, cast
 
 import nd2
-from tifffile import TiffFile, TiffPage, imread
+from nd2.structures import Metadata, ExpLoop
+from tifffile import TiffFile, TiffPage, imread, TiffPageSeries
 from numpy.typing import NDArray
+import numpy as np
 
 
 @dataclass
@@ -34,6 +36,12 @@ class ImageReader(ABC):
     
     @property
     @abstractmethod
+    def serie_axis_index(self) -> int | None:
+        """Return the index of the 'serie' axis in the axes string, or None if not present."""
+        ...
+    
+    @property
+    @abstractmethod
     def resolution(self) -> tuple[float, float]:
         """Return the resolution (um per pixel) for (x,y) axes. If none available, return (1.,1.)."""
         ...
@@ -45,37 +53,46 @@ class ImageReader(ABC):
         ...
     
     @abstractmethod
-    def get_array(self) -> NDArray:
+    def get_array(self) -> NDArray | list[NDArray]:
         """Return the image data as a NumPy array."""
         ...
 
-@dataclass
+@dataclass(slots=True)
 class Nd2Reader(ImageReader):
+    
+    _sizes: Mapping[str, int] = field(init=False)
+    _meta: Metadata = field(init=False)
+    _exploop: list[ExpLoop] = field(init=False)
     
     @classmethod
     def can_read(cls, path: Path) -> bool:
         return path.suffix.lower() == '.nd2'
 
+    def __post_init__(self) -> None:
+        with nd2.ND2File(self.img_path) as file:
+            self._sizes = file.sizes
+            self._meta = file.metadata
+            self._exploop = file.experiment
+    
     @property
     def axes(self) -> str:
-        with nd2.ND2File(self.img_path) as file:
-            sizes = file.sizes
-        return ''.join(sizes.keys())
+        return ''.join(self._sizes.keys())
     
     @property
     def channel_number(self) -> int:
-        with nd2.ND2File(self.img_path) as file:
-            sizes = file.sizes
-        return sizes.get('C', 1)
+        return self._sizes.get('C', 1)
     
+    @property
+    def serie_axis_index(self) -> int | None:
+        if 'P' not in self.axes:
+            return None
+        return self.axes.index('P')
+            
     @property
     def resolution(self) -> tuple[float, float]:
         default_res = (1., 1.)
         
-        with nd2.ND2File(self.img_path) as file:
-            meta = file.metadata
-        
-        channels = getattr(meta, 'channels', None)
+        channels = getattr(self._meta, 'channels', None)
         if not channels:
             return default_res
         
@@ -94,66 +111,82 @@ class Nd2Reader(ImageReader):
         
     @property
     def interval(self) -> int | None:
-        with nd2.ND2File(self.img_path) as file:
-            exp = file.experiment
-            sizes = file.sizes
-        
-        if sizes.get('T', 1)>1:
-            exploop = exp[0]
-            if exploop.type == 'TimeLoop': #for normal timelapse experiments
-                return int(exploop.parameters.periodMs/1000)
-            elif exploop.type == 'NETimeLoop': #for ND2 Merged Experiments
-                return int(exploop.parameters.periods[0].periodMs/1000)
+        if self._sizes.get('T', 1)>1:
+            loop0 = self._exploop[0]
+            if loop0.type == 'TimeLoop': #for normal timelapse experiments
+                return int(loop0.parameters.periodMs/1000)
+            elif loop0.type == 'NETimeLoop': #for ND2 Merged Experiments
+                return int(loop0.parameters.periods[0].periodMs/1000)
         else:
             return None
     
-    def get_array(self) -> NDArray:
-        return nd2.imread(self.img_path)
+    def get_array(self) -> NDArray | list[NDArray]:
+        arr = nd2.imread(self.img_path)
+        if self.serie_axis_index is None:
+            return arr
+        
+        series_lst = np.split(arr, arr.shape[self.serie_axis_index], axis=self.serie_axis_index)
+        return [s.squeeze(axis=self.serie_axis_index) for s in series_lst]
+        
     
 @dataclass
 class TiffReader(ImageReader):
+    
+    _tifserie0: TiffPageSeries = field(init=False)
+    _page0: TiffPage = field(init=False)
+    _imageJ_meta: dict[str, Any] = field(init=False)
+    
     @classmethod
     def can_read(cls, path: Path) -> bool:
         return path.suffix.lower() in ['.tif', '.tiff']
 
+    def __post_init__(self) -> None:
+        with TiffFile(self.img_path) as tif:
+            self._tifserie0 = tif.series[0]
+            self._page0 = cast(TiffPage, tif.pages[0]) # for typing purposes
+            self._imageJ_meta = tif.imagej_metadata or {}
+            
     @property
     def axes(self) -> str:
-        with TiffFile(self.img_path) as tif:
-            return tif.series[0].axes
+        return self._tifserie0.axes
     
     @property
     def channel_number(self) -> int:
-        with TiffFile(self.img_path) as tif:
-            shape = tif.series[0].shape
-            axes = tif.series[0].axes
-        if 'C' in axes:
-            c_index = axes.index('C')
+        shape = self._tifserie0.shape
+        if 'C' in self.axes:
+            c_index = self.axes.index('C')
             return shape[c_index]
         else:
             return 1
     
     @property
+    def serie_axis_index(self) -> int | None:
+        if 'S' not in self.axes:
+            return None
+        return self.axes.index('S')
+    
+    @property
     def resolution(self) -> tuple[float, float]:
         x_um_per_pix, y_um_per_pix = (1., 1.)
-        with TiffFile(self.img_path) as tif:
-            page0 = cast(TiffPage, tif.pages[0]) # for typing purposes
-            for tag in page0.tags:
-                if tag.name == 'XResolution':
-                    xres = tag.value[0]/tag.value[1]
-                    x_um_per_pix = round(1./float(xres), 4)
-                if tag.name == 'YResolution':
-                    yres = tag.value[0]/tag.value[1]
-                    y_um_per_pix = round(1./float(yres), 4)
+        for tag in self._page0.tags:
+            if tag.name == 'XResolution':
+                xres = tag.value[0]/tag.value[1]
+                x_um_per_pix = round(1./float(xres), 4)
+            if tag.name == 'YResolution':
+                yres = tag.value[0]/tag.value[1]
+                y_um_per_pix = round(1./float(yres), 4)
         return (x_um_per_pix, y_um_per_pix)
                 
     @property
     def interval(self) -> float | None:
-        with TiffFile(self.img_path) as tif:
-            imgj_meta = tif.imagej_metadata or {}
-        return imgj_meta.get('finterval', None)
+        return self._imageJ_meta.get('finterval', None)
     
-    def get_array(self) -> NDArray:
-        return imread(self.img_path)
+    def get_array(self) -> NDArray | list[NDArray]:
+        arr = imread(self.img_path)
+        if self.serie_axis_index is None:
+            return arr
+        series_lst = np.split(arr, arr.shape[self.serie_axis_index], axis=self.serie_axis_index)
+        return [s.squeeze(axis=self.serie_axis_index) for s in series_lst]
 
 
 class ImageReaderError(Exception):
@@ -173,7 +206,6 @@ READER_BY_SUFFIX: dict[str, Type[ImageReader]] = {
     ".tiff": TiffReader,
     ".nd2": Nd2Reader,
 }
-
 
 def get_reader(path: str | Path) -> ImageReader:
     """Return an ImageReader instance for the given path, based on suffix."""
@@ -197,28 +229,32 @@ def get_reader(path: str | Path) -> ImageReader:
 
 
 if __name__ == "__main__":
-    # Test writing tiff with extra metadata
-    from pathlib import Path
-    import numpy as np
-    import nd2
     
-    tif_path = Path('/home/ben/Docker_mount/Test_images/tiff/Run2/c2z25t23v1_tif.tif')
+    tif_path = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run2/c2z25t23v1_tif.tif')
     
-    rtif = TiffReader(tif_path)
+    rtif = get_reader(tif_path)
     print(rtif.channel_number)
-    # print(rtif.resolution)
-    # print(rtif.interval)
-    # print(rtif.axes)
-    # print(rtif.get_array().shape)
+    print(rtif.serie_axis_index)
+    print(rtif.resolution)
+    print(rtif.interval)
+    print(rtif.axes)
+    arrs = rtif.get_array()
+    if isinstance(arrs, list):
+        print(len(arrs))
+        print(arrs[0].shape)
+    else:
+        print(arrs.shape)
         
     
     
-    nd2_path = Path('/home/ben/Docker_mount/Test_images/nd2/Run2/c2z25t23v1_nd2.nd2')
+    nd2_path = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/Anna/241217-rGEM-LTB4/Lib53/Lib53_1dpseed_100nMLTB4_001.nd2')
+    
     
     rnd2 = get_reader(nd2_path)
-    # rnd2 = Nd2Reader(nd2_path)
+    # # rnd2 = Nd2Reader(nd2_path)
     print(rnd2.resolution)
     print(rnd2.interval)
     print(rnd2.axes)
-    print(rnd2.get_array().shape)
+    print(rnd2.serie_axis_index)
+    print(len(rnd2.get_array()))
     
