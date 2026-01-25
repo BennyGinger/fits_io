@@ -1,25 +1,15 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Sequence, TypeAlias
+from typing import Any, Mapping, Sequence
 import json
 
 from numpy.typing import NDArray
 import numpy as np
 
 from fits_io.image_reader import ImageReader
+from fits_io import PIPELINE_TAG
+from fits_io._types import ExtraTags, PixelSize, PixelDensity
 
-
-TiffTag: TypeAlias = tuple[
-    int,    # tag id
-    str,    # TIFF dtype
-    int,    # count (0 = infer)
-    Any,    # value
-    bool,   # writeonce
-]
-
-ExtraTags: TypeAlias = Sequence[TiffTag]
-
-PIPELINE_TAG = 65000  # private tag to save custom metadata in tiff files
 
 LABEL_TO_COLOR = {
     "green": 'green',
@@ -48,14 +38,20 @@ class StackMeta:
 
 
 class ResolutionMeta: 
-    def __init__(self, resolution: tuple[float, float]) -> None:
-        self._resolution = resolution
+    def __init__(self, resolution: PixelSize) -> None:
+        self._resolution = resolution # e.g. um/pixel
         self.unit = 'um'
     
     @property
-    def resolution(self) -> tuple[float, float] | None:
+    def resolution(self) -> PixelDensity | None:
+        """Return pixel per unit resulution for imagej (pixel density)"""
         if self._resolution == (1., 1.):
             return None
+        return (1/self._resolution[0], 1/self._resolution[1])
+    
+    @property
+    def pixel_size(self) -> PixelSize:
+        """Return pixel size in um."""
         return self._resolution
 
 
@@ -105,9 +101,8 @@ class TiffMetadata:
     """Container for ImageJ-compatible TIFF metadata."""
     
     imagej_meta: dict[str, Any] = field(default_factory=dict)
-    resolution: tuple[float, float] | None = None
+    resolution: PixelDensity | None = None
     extratags: ExtraTags | None = None
-
 
 
 
@@ -144,7 +139,7 @@ def build_imagej_metadata(img_reader: ImageReader, channel_labels: str | Sequenc
     extratags: ExtraTags | None = None
     payload = {}
     if resolution_meta.resolution is not None:
-        payload['resolution'] = resolution_meta.resolution
+        payload['resolution'] = resolution_meta.pixel_size
     if custom_metadata is not None:
         payload.update(custom_metadata)
     if payload:

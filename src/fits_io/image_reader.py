@@ -2,13 +2,19 @@ from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Mapping, Type, cast
+import logging
 
 import nd2
-from nd2.structures import Metadata, ExpLoop
+from nd2.structures import Channel, ExpLoop, ChannelMeta, Volume
 from tifffile import TiffFile, TiffPage, imread, TiffPageSeries
 from numpy.typing import NDArray
 import numpy as np
 
+from fits_io import PIPELINE_TAG
+from fits_io._types import PixelSize
+
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ImageReader(ABC):
@@ -36,13 +42,19 @@ class ImageReader(ABC):
     
     @property
     @abstractmethod
+    def channel_labels(self) -> list[str] | None:
+        """Return the list of channel labels, or None if not available."""
+        ...
+    
+    @property
+    @abstractmethod
     def serie_axis_index(self) -> int | None:
         """Return the index of the 'serie' axis in the axes string, or None if not present."""
         ...
     
     @property
     @abstractmethod
-    def resolution(self) -> tuple[float, float]:
+    def resolution(self) -> PixelSize:
         """Return the resolution (um per pixel) for (x,y) axes. If none available, return (1.,1.)."""
         ...
     
@@ -50,6 +62,12 @@ class ImageReader(ABC):
     @abstractmethod
     def interval(self) -> float | None:
         """Return the time interval between frames in seconds, or None if not available."""
+        ...
+    
+    @property
+    @abstractmethod
+    def custom_metadata(self) -> Mapping[str, Any] | None:
+        """Return custom metadata, if any, associated with the custom pipeline saved under extratags, or None if not available."""
         ...
     
     @abstractmethod
@@ -61,7 +79,7 @@ class ImageReader(ABC):
 class Nd2Reader(ImageReader):
     
     _sizes: Mapping[str, int] = field(init=False)
-    _meta: Metadata = field(init=False)
+    _channels: list[Channel] | None = field(init=False)
     _exploop: list[ExpLoop] = field(init=False)
     
     @classmethod
@@ -71,7 +89,8 @@ class Nd2Reader(ImageReader):
     def __post_init__(self) -> None:
         with nd2.ND2File(self.img_path) as file:
             self._sizes = file.sizes
-            self._meta = file.metadata
+            meta = file.metadata
+            self._channels = getattr(meta, 'channels', None)
             self._exploop = file.experiment
     
     @property
@@ -83,29 +102,39 @@ class Nd2Reader(ImageReader):
         return self._sizes.get('C', 1)
     
     @property
+    def channel_labels(self) -> list[str] | None:
+        if self._channels is None:
+            return None
+        
+        labels: list[str] = []
+        for channel in self._channels:
+            chan: ChannelMeta = channel.channel
+            labels.append(chan.name)
+        return labels
+    
+    @property
     def serie_axis_index(self) -> int | None:
         if 'P' not in self.axes:
             return None
         return self.axes.index('P')
             
     @property
-    def resolution(self) -> tuple[float, float]:
+    def resolution(self) -> PixelSize:
         default_res = (1., 1.)
         
-        channels = getattr(self._meta, 'channels', None)
-        if not channels:
+        if self._channels is None:
             return default_res
         
-        ch0 = channels[0]
-        vol = getattr(ch0, "volume", None)
+        ch0 = self._channels[0]
+        vol: Volume | None = getattr(ch0, "volume", None)
         if vol is None:
             return default_res
 
-        calib = getattr(vol, "axesCalibration", None)
+        # (x, y, z)
+        calib: tuple[float, float, float] | None = getattr(vol, "axesCalibration", None)
         if not calib:
             return default_res
 
-        # be defensive about length/type
         x_um_per_pix, y_um_per_pix = calib[:2]
         return (round(float(x_um_per_pix), 4), round(float(y_um_per_pix), 4))
         
@@ -119,6 +148,11 @@ class Nd2Reader(ImageReader):
                 return int(loop0.parameters.periods[0].periodMs/1000)
         else:
             return None
+    
+    @property
+    def custom_metadata(self) -> Mapping[str, Any] | None:
+        logger.warning(".nd2 file do not have custom metadata saved")
+        return None  # ND2 files do not have custom metadata in this implementation.
     
     def get_array(self) -> NDArray | list[NDArray]:
         arr = nd2.imread(self.img_path)
@@ -135,6 +169,7 @@ class TiffReader(ImageReader):
     _tifserie0: TiffPageSeries = field(init=False)
     _page0: TiffPage = field(init=False)
     _imageJ_meta: dict[str, Any] = field(init=False)
+    _custom_metadata: Mapping[str, Any] | None = field(init=False)
     
     @classmethod
     def can_read(cls, path: Path) -> bool:
@@ -145,6 +180,8 @@ class TiffReader(ImageReader):
             self._tifserie0 = tif.series[0]
             self._page0 = cast(TiffPage, tif.pages[0]) # for typing purposes
             self._imageJ_meta = tif.imagej_metadata or {}
+            meta = self._page0.tags.get(PIPELINE_TAG)
+            self._custom_metadata = meta.value if meta is not None else None
             
     @property
     def axes(self) -> str:
@@ -160,13 +197,20 @@ class TiffReader(ImageReader):
             return 1
     
     @property
+    def channel_labels(self) -> list[str] | None:
+        labels = self._imageJ_meta.get('Labels', None)
+        if labels is None:
+            return None
+        return labels
+    
+    @property
     def serie_axis_index(self) -> int | None:
         if 'S' not in self.axes:
             return None
         return self.axes.index('S')
     
     @property
-    def resolution(self) -> tuple[float, float]:
+    def resolution(self) -> PixelSize:
         x_um_per_pix, y_um_per_pix = (1., 1.)
         for tag in self._page0.tags:
             if tag.name == 'XResolution':
@@ -180,6 +224,10 @@ class TiffReader(ImageReader):
     @property
     def interval(self) -> float | None:
         return self._imageJ_meta.get('finterval', None)
+    
+    @property
+    def custom_metadata(self) -> Mapping[str, Any] | None:
+        return self._custom_metadata
     
     def get_array(self) -> NDArray | list[NDArray]:
         arr = imread(self.img_path)
@@ -230,31 +278,39 @@ def get_reader(path: str | Path) -> ImageReader:
 
 if __name__ == "__main__":
     
-    tif_path = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run2/c2z25t23v1_tif.tif')
+    tif_path = Path('/home/ben/Docker_mount/Test_images/nd2/Run2/test.tiff')
     
-    rtif = get_reader(tif_path)
-    print(rtif.channel_number)
-    print(rtif.serie_axis_index)
-    print(rtif.resolution)
-    print(rtif.interval)
-    print(rtif.axes)
-    arrs = rtif.get_array()
-    if isinstance(arrs, list):
-        print(len(arrs))
-        print(arrs[0].shape)
-    else:
-        print(arrs.shape)
+    
+    # rtif = get_reader(tif_path)
+    # print(rtif.channel_number)
+    # print(rtif.serie_axis_index)
+    # print(rtif.resolution)
+    # print(rtif.interval)
+    # print(rtif.axes)
+    # arrs = rtif.get_array()
+    # if isinstance(arrs, list):
+    #     print(len(arrs))
+    #     print(arrs[0].shape)
+    # else:
+    #     print(arrs.shape)
         
     
     
-    nd2_path = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/Anna/241217-rGEM-LTB4/Lib53/Lib53_1dpseed_100nMLTB4_001.nd2')
+    # nd2_path = Path('/home/ben/Docker_mount/Test_images/nd2/Run2/c2z25t23v1_nd2.nd2')
+    # save_path = Path('/home/ben/Docker_mount/Test_images/nd2/Run2/test.tiff')
     
     
-    rnd2 = get_reader(nd2_path)
-    # # rnd2 = Nd2Reader(nd2_path)
-    print(rnd2.resolution)
-    print(rnd2.interval)
-    print(rnd2.axes)
-    print(rnd2.serie_axis_index)
-    print(len(rnd2.get_array()))
+    # with nd2.ND2File(nd2_path) as file:
+    #     meta = file.metadata
+    #     chans = getattr(meta, 'channels', None)
+    #     if chans is not None:
+    #         for ch in chans:
+    #             print(ch.channel.name)
+        # rnd2 = get_reader(nd2_path)
+    # # # rnd2 = Nd2Reader(nd2_path)
+    # print(rnd2.resolution)
+    # print(rnd2.interval)
+    # print(rnd2.axes)
+    # print(rnd2.serie_axis_index)
+    # print(len(rnd2.get_array()))
     

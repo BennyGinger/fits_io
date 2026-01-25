@@ -221,16 +221,32 @@ def test_nd2_get_array_with_series_splits(monkeypatch, tmp_path: Path):
 # ==========================
 # Fakes / stubs
 # ==========================
+class _FakeTiffTags:
+    """Acts like tifffile.TiffTags for what we use: iter + get(tag_code)."""
+    def __init__(self, tags_list):
+        self._tags = list(tags_list)
+
+    def __iter__(self):
+        return iter(self._tags)
+
+    def get(self, code, default=None):
+        # tifffile lets you lookup by numeric tag code.
+        for t in self._tags:
+            if getattr(t, "code", None) == code:
+                return t
+        return default
+
 
 class _FakeTag:
-    def __init__(self, name, value):
+    def __init__(self, name, value, code=None):
         self.name = name
         self.value = value
+        self.code = code  # <-- needed for PIPELINE_TAG lookup
 
 
 class _FakePage:
     def __init__(self, tags):
-        self.tags = tags
+        self.tags = _FakeTiffTags(tags)
 
 
 class _FakeSeries:
