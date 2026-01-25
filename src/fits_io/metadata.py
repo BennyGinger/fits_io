@@ -118,24 +118,28 @@ def build_imagej_metadata(img_reader: ImageReader, channel_labels: str | Sequenc
     Returns:
         TiffMetadata object containing metadata, resolution, and extra tags.
     """
+    # extract metadata components
+    stack_meta = _get_stack_meta(img_reader)
+    channel_meta = _get_chan_meta(img_reader, channel_labels)
     
-    img_meta = StackMeta(
-        axes=img_reader.axes,
-        finterval=img_reader.interval)
-    
-    if isinstance(channel_labels, str):
-        channel_labels = [channel_labels]
-    channel_meta = ChannelMeta(
-        channel_number=img_reader.channel_number,
-        labels=channel_labels)
-    
-    metadata_dict = img_meta.to_dict()
+    # build final metadata dict
+    metadata_dict = stack_meta.to_dict()
     metadata_dict.update(channel_meta.to_dict())
     
+    # add resolution info
     resolution_meta = ResolutionMeta(img_reader.resolution)
     if resolution_meta.resolution is not None:
         metadata_dict['unit'] = resolution_meta.unit
     
+    # build custom metadata to be stored in private tag
+    extratags = _get_extratags(custom_metadata, resolution_meta)
+    
+    return TiffMetadata(
+        imagej_meta=metadata_dict,
+        resolution=resolution_meta.resolution,
+        extratags=extratags)
+
+def _get_extratags(custom_metadata: Mapping[str, Any] | None, resolution_meta: ResolutionMeta) -> ExtraTags | None:
     extratags: ExtraTags | None = None
     payload = {}
     if resolution_meta.resolution is not None:
@@ -144,11 +148,24 @@ def build_imagej_metadata(img_reader: ImageReader, channel_labels: str | Sequenc
         payload.update(custom_metadata)
     if payload:
         extratags = [(PIPELINE_TAG, "s", 0, json.dumps(payload, ensure_ascii=False), True)]
+    return extratags
+
+def _get_chan_meta(img_reader: ImageReader, channel_labels: str | Sequence[str] | None) -> ChannelMeta:
     
-    return TiffMetadata(
-        imagej_meta=metadata_dict,
-        resolution=resolution_meta.resolution,
-        extratags=extratags)
+    if isinstance(channel_labels, str):
+        channel_labels = [channel_labels]
+    channel_meta = ChannelMeta(
+        channel_number=img_reader.channel_number,
+        labels=channel_labels)
+        
+    return channel_meta
+
+def _get_stack_meta(img_reader: ImageReader) -> StackMeta:
+    stack_meta = StackMeta(
+        axes=img_reader.axes,
+        finterval=img_reader.interval)
+        
+    return stack_meta
                           
 
 if __name__ == '__main__':

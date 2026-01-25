@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
+import json
 from pathlib import Path
 from typing import Any, Mapping, Type, cast
 import logging
@@ -48,6 +49,12 @@ class ImageReader(ABC):
     
     @property
     @abstractmethod
+    def series_number(self) -> int:
+        """Return the number of series in the image, or 1 if not applicable."""
+        ...
+    
+    @property
+    @abstractmethod
     def serie_axis_index(self) -> int | None:
         """Return the index of the 'serie' axis in the axes string, or None if not present."""
         ...
@@ -79,6 +86,7 @@ class ImageReader(ABC):
 class Nd2Reader(ImageReader):
     
     _sizes: Mapping[str, int] = field(init=False)
+    _axes: str = field(init=False)
     _channels: list[Channel] | None = field(init=False)
     _exploop: list[ExpLoop] = field(init=False)
     
@@ -89,13 +97,14 @@ class Nd2Reader(ImageReader):
     def __post_init__(self) -> None:
         with nd2.ND2File(self.img_path) as file:
             self._sizes = file.sizes
+            self._axes = ''.join(self._sizes.keys())
             meta = file.metadata
             self._channels = getattr(meta, 'channels', None)
             self._exploop = file.experiment
     
     @property
     def axes(self) -> str:
-        return ''.join(self._sizes.keys())
+        return self._axes.replace('P', '')  # Remove 'P' axis for series handling.
     
     @property
     def channel_number(self) -> int:
@@ -113,10 +122,14 @@ class Nd2Reader(ImageReader):
         return labels
     
     @property
+    def series_number(self) -> int:
+        return self._sizes.get('P', 1)
+    
+    @property
     def serie_axis_index(self) -> int | None:
-        if 'P' not in self.axes:
+        if 'P' not in self._axes:
             return None
-        return self.axes.index('P')
+        return self._axes.index('P')
             
     @property
     def resolution(self) -> PixelSize:
@@ -139,15 +152,15 @@ class Nd2Reader(ImageReader):
         return (round(float(x_um_per_pix), 4), round(float(y_um_per_pix), 4))
         
     @property
-    def interval(self) -> int | None:
-        if self._sizes.get('T', 1)>1:
-            loop0 = self._exploop[0]
-            if loop0.type == 'TimeLoop': #for normal timelapse experiments
-                return int(loop0.parameters.periodMs/1000)
-            elif loop0.type == 'NETimeLoop': #for ND2 Merged Experiments
-                return int(loop0.parameters.periods[0].periodMs/1000)
-        else:
+    def interval(self) -> float | None:
+        if self._sizes.get('T', 1) <= 1 or not self._exploop:
             return None
+        
+        loop0 = self._exploop[0]
+        if loop0.type == 'TimeLoop': #for normal timelapse experiments
+            return round(loop0.parameters.periodMs/1000)
+        elif loop0.type == 'NETimeLoop': #for ND2 Merged Experiments
+            return round(loop0.parameters.periods[0].periodMs/1000)
     
     @property
     def custom_metadata(self) -> Mapping[str, Any] | None:
@@ -156,17 +169,20 @@ class Nd2Reader(ImageReader):
     
     def get_array(self) -> NDArray | list[NDArray]:
         arr = nd2.imread(self.img_path)
-        if self.serie_axis_index is None:
-            return arr
         
-        series_lst = np.split(arr, arr.shape[self.serie_axis_index], axis=self.serie_axis_index)
-        return [s.squeeze(axis=self.serie_axis_index) for s in series_lst]
+        axis = self.serie_axis_index
+        if axis is None:
+            return arr
+
+        series_lst = np.split(arr, arr.shape[axis], axis=axis)
+        return [s.squeeze(axis=axis) for s in series_lst]
         
     
 @dataclass
 class TiffReader(ImageReader):
     
     _tifserie0: TiffPageSeries = field(init=False)
+    _axes: str = field(init=False)
     _page0: TiffPage = field(init=False)
     _imageJ_meta: dict[str, Any] = field(init=False)
     _custom_metadata: Mapping[str, Any] | None = field(init=False)
@@ -178,20 +194,32 @@ class TiffReader(ImageReader):
     def __post_init__(self) -> None:
         with TiffFile(self.img_path) as tif:
             self._tifserie0 = tif.series[0]
+            self._axes = self._tifserie0.axes
             self._page0 = cast(TiffPage, tif.pages[0]) # for typing purposes
             self._imageJ_meta = tif.imagej_metadata or {}
+            
             meta = self._page0.tags.get(PIPELINE_TAG)
-            self._custom_metadata = meta.value if meta is not None else None
+            if meta is None:
+                self._custom_metadata = None
+            else:
+                v = meta.value
+                if isinstance(v, (bytes, bytearray)):
+                    v = v.decode("utf-8", "replace")
+                try:
+                    self._custom_metadata = json.loads(v)
+                except Exception:
+                    logger.warning("PIPELINE_TAG present but not valid JSON")
+                    self._custom_metadata = None
             
     @property
     def axes(self) -> str:
-        return self._tifserie0.axes
+        return self._axes.replace('S', '')  # Remove 'S' axis for series handling.
     
     @property
     def channel_number(self) -> int:
         shape = self._tifserie0.shape
-        if 'C' in self.axes:
-            c_index = self.axes.index('C')
+        if 'C' in self._axes:
+            c_index = self._axes.index('C')
             return shape[c_index]
         else:
             return 1
@@ -204,21 +232,31 @@ class TiffReader(ImageReader):
         return labels
     
     @property
+    def series_number(self) -> int:
+        if 'S' in self._axes:
+            s_index = self._axes.index('S')
+            return self._tifserie0.shape[s_index]
+        else:
+            return 1
+    
+    @property
     def serie_axis_index(self) -> int | None:
-        if 'S' not in self.axes:
+        if 'S' not in self._axes:
             return None
-        return self.axes.index('S')
+        return self._axes.index('S')
     
     @property
     def resolution(self) -> PixelSize:
-        x_um_per_pix, y_um_per_pix = (1., 1.)
-        for tag in self._page0.tags:
-            if tag.name == 'XResolution':
-                xres = tag.value[0]/tag.value[1]
-                x_um_per_pix = round(1./float(xres), 4)
-            if tag.name == 'YResolution':
-                yres = tag.value[0]/tag.value[1]
-                y_um_per_pix = round(1./float(yres), 4)
+        x_res = self._page0.tags.get('XResolution')
+        y_res = self._page0.tags.get('YResolution')
+        
+        if x_res is None or y_res is None:
+            return (1., 1.)
+        
+        xres = x_res.value[0]/x_res.value[1]
+        x_um_per_pix = round(1./float(xres), 4)
+        yres = y_res.value[0]/y_res.value[1]
+        y_um_per_pix = round(1./float(yres), 4)
         return (x_um_per_pix, y_um_per_pix)
                 
     @property
