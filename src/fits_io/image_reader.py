@@ -11,7 +11,7 @@ from tifffile import TiffFile, TiffPage, imread, TiffPageSeries
 from numpy.typing import NDArray
 import numpy as np
 
-from fits_io import PIPELINE_TAG
+from fits.provenance import PIPELINE_TAG
 from fits_io._types import PixelSize
 
 
@@ -164,8 +164,8 @@ class Nd2Reader(ImageReader):
     
     @property
     def custom_metadata(self) -> Mapping[str, Any] | None:
-        logger.warning(".nd2 file do not have custom metadata saved")
-        return None  # ND2 files do not have custom metadata in this implementation.
+        logger.info(".nd2 file do not have custom metadata saved")
+        return None
     
     def get_array(self) -> NDArray | list[NDArray]:
         arr = nd2.imread(self.img_path)

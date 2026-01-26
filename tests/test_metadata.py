@@ -145,24 +145,61 @@ def test_build_imagej_metadata_no_resolution_means_no_unit_and_no_resolution_pay
 
     assert out.resolution is None
     assert "unit" not in out.imagej_meta
-    # payload empty => extratags None
-    assert out.extratags is None
+    # provenance is always written now
+    assert out.extratags is not None
+    assert len(out.extratags) == 1
+
+    tag, dtype, count, value, writeonce = out.extratags[0]
+    assert tag == md.PIPELINE_TAG  # or PIPELINE_TAG if you import it
+    assert dtype == "B"
+    assert count == len(value)
+    assert writeonce is True
+
+    payload = json.loads(value.decode("utf-8"))
+    assert md.STEP_NAME in payload
+    step_meta = payload[md.STEP_NAME]
+
+    # basic provenance keys exist
+    assert "dist" in step_meta
+    assert "version" in step_meta
+    assert "timestamp" in step_meta
+
+    # and resolution is NOT included when default resolution
+    assert "resolution" not in step_meta
 
 
 def test_build_imagej_metadata_custom_metadata_only_creates_extratags():
     reader = DummyReader(resolution=(1.0, 1.0))
-    out = md.build_imagej_metadata(cast(md.ImageReader, reader), custom_metadata={"a": 1, "b": {"c": 2}})
+    out = md.build_imagej_metadata(
+        cast(md.ImageReader, reader),
+        custom_metadata={"a": 1, "b": {"c": 2}},
+    )
 
     assert out.extratags is not None
     (tag_id, tiff_dtype, count, value, writeonce) = out.extratags[0]
+
     assert tag_id == md.PIPELINE_TAG
-    assert tiff_dtype == "s"
-    assert count == 0
+    assert tiff_dtype == "B"
+    assert isinstance(value, (bytes, bytearray))
+    assert count == len(value)
     assert writeonce is True
 
-    payload = json.loads(value)
-    assert payload == {"a": 1, "b": {"c": 2}}
-    assert "resolution" not in payload
+    payload = json.loads(value.decode("utf-8"))
+
+    # existing metadata remains top-level
+    assert payload["a"] == 1
+    assert payload["b"] == {"c": 2}
+
+    # provenance step is also present
+    assert md.STEP_NAME in payload
+    step_meta = payload[md.STEP_NAME]
+    assert "dist" in step_meta
+    assert "version" in step_meta
+    assert "timestamp" in step_meta
+
+    # no resolution payload when default resolution
+    assert "resolution" not in step_meta
+
 
 
 def test_build_imagej_metadata_resolution_payload_is_pixel_size_um_per_px():
@@ -170,7 +207,13 @@ def test_build_imagej_metadata_resolution_payload_is_pixel_size_um_per_px():
     out = md.build_imagej_metadata(cast(md.ImageReader, reader), custom_metadata={"x": "y"})
     assert out.extratags is not None
 
-    payload = json.loads(out.extratags[0][3])
-    # stored payload uses pixel_size (um/px), not density
-    assert payload["resolution"] == [0.5, 0.25] or payload["resolution"] == (0.5, 0.25)
+    raw = out.extratags[0][3]
+    payload = json.loads(raw.decode("utf-8"))
+
+    # resolution is stored under the step, as pixel size (um/px)
+    step_meta = payload[md.STEP_NAME]
+    assert step_meta["resolution"] == [0.5, 0.25] or step_meta["resolution"] == (0.5, 0.25)
+
+    # and your previous metadata remains top-level
     assert payload["x"] == "y"
+

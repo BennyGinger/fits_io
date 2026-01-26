@@ -6,10 +6,12 @@ import json
 from numpy.typing import NDArray
 import numpy as np
 
+from fits.provenance import PIPELINE_TAG, add_step
 from fits_io.image_reader import ImageReader
-from fits_io import PIPELINE_TAG
 from fits_io._types import ExtraTags, PixelSize, PixelDensity
 
+STEP_NAME = 'fits_io.convert'
+DIST_NAME = "fits-io"
 
 LABEL_TO_COLOR = {
     "green": 'green',
@@ -66,7 +68,7 @@ def make_color_lut(color: str) -> NDArray[np.uint8]:
 @dataclass(slots=True)
 class ChannelMeta:
     channel_number: int
-    labels: Sequence[str] | None = None
+    labels: str | Sequence[str] | None = None
     mode: str = field(init=False)
     luts: list[NDArray[np.uint8]] | None = field(init=False)
     
@@ -75,6 +77,9 @@ class ChannelMeta:
             self.mode, self.luts = 'grayscale', None
             self.labels = [f"C{i+1}" for i in range(self.channel_number)]
             return
+        
+        if isinstance(self.labels, str):
+            self.labels = [self.labels]
         
         if self.labels is not None and len(self.labels) != self.channel_number:
             raise ValueError(f"Expected {self.channel_number} labels, got {len(self.labels)}")
@@ -106,21 +111,22 @@ class TiffMetadata:
 
 
 
-def build_imagej_metadata(img_reader: ImageReader, channel_labels: str | Sequence[str] | None = None, custom_metadata: Mapping[str, Any] | None = None) -> TiffMetadata:
+def build_imagej_metadata(img_reader: ImageReader, *, channel_labels: str | Sequence[str] | None = None, custom_metadata: Mapping[str, Any] | None = None, extra_step_metadata: Mapping[str, Any] | None = None) -> TiffMetadata:
     """
     Build ImageJ-compatible metadata for saving TIFF files.
     
     Args:
         img_reader: An ImageReader instance to read metadata from.
         channel_labels: Optional; either a single string label or a sequence of labels for each channel. If None, default labels will be used.
-        custom_metadata: Optional mapping of custom metadata to include under the private tag.
+        custom_metadata: Optional existing metadata associated with previous steps to include under the private tag.
+        extra_step_metadata: Optional mapping of additional metadata to include in the processing step.
     
     Returns:
         TiffMetadata object containing metadata, resolution, and extra tags.
     """
     # extract metadata components
-    stack_meta = _get_stack_meta(img_reader)
-    channel_meta = _get_chan_meta(img_reader, channel_labels)
+    stack_meta = StackMeta(axes=img_reader.axes, finterval=img_reader.interval)
+    channel_meta = ChannelMeta(channel_number=img_reader.channel_number, labels=channel_labels)
     
     # build final metadata dict
     metadata_dict = stack_meta.to_dict()
@@ -132,40 +138,23 @@ def build_imagej_metadata(img_reader: ImageReader, channel_labels: str | Sequenc
         metadata_dict['unit'] = resolution_meta.unit
     
     # build custom metadata to be stored in private tag
-    extratags = _get_extratags(custom_metadata, resolution_meta)
+    extratags: ExtraTags | None = None
+    payload = add_step(custom_metadata, dist_name=DIST_NAME, step=STEP_NAME)
+    if resolution_meta.resolution is not None:
+        payload[STEP_NAME]['resolution'] = resolution_meta.pixel_size
+    if extra_step_metadata is not None:
+        payload[STEP_NAME].update(extra_step_metadata)
+    if payload:
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        extratags = [(PIPELINE_TAG, "B", len(raw), raw, True)]
     
     return TiffMetadata(
         imagej_meta=metadata_dict,
         resolution=resolution_meta.resolution,
         extratags=extratags)
 
-def _get_extratags(custom_metadata: Mapping[str, Any] | None, resolution_meta: ResolutionMeta) -> ExtraTags | None:
-    extratags: ExtraTags | None = None
-    payload = {}
-    if resolution_meta.resolution is not None:
-        payload['resolution'] = resolution_meta.pixel_size
-    if custom_metadata is not None:
-        payload.update(custom_metadata)
-    if payload:
-        extratags = [(PIPELINE_TAG, "s", 0, json.dumps(payload, ensure_ascii=False), True)]
-    return extratags
 
-def _get_chan_meta(img_reader: ImageReader, channel_labels: str | Sequence[str] | None) -> ChannelMeta:
-    
-    if isinstance(channel_labels, str):
-        channel_labels = [channel_labels]
-    channel_meta = ChannelMeta(
-        channel_number=img_reader.channel_number,
-        labels=channel_labels)
-        
-    return channel_meta
 
-def _get_stack_meta(img_reader: ImageReader) -> StackMeta:
-    stack_meta = StackMeta(
-        axes=img_reader.axes,
-        finterval=img_reader.interval)
-        
-    return stack_meta
                           
 
 if __name__ == '__main__':

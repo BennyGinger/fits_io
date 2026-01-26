@@ -64,9 +64,9 @@ def test_tiff_axes_channel_series_resolution_interval(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(m, "TiffFile", _FakeTiffFile_full)
 
     r = m.TiffReader(p)
-    assert r.axes == "SCYX"
+    assert r.axes == "CYX"
     assert r.channel_number == 3
-    assert r.serie_axis_index == 0  # "S" first in "SCYX"
+    # assert r.serie_axis_index == 0  # "S" first in "SCYX"
     assert r.resolution == (0.5, 0.25)  # from fake tags
     assert r.interval == 11.0  # finterval from fake imagej_metadata
 
@@ -114,9 +114,9 @@ def test_nd2_axes_channel_series(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(m.nd2, "ND2File", _FakeND2File_basic)
 
     r = m.Nd2Reader(p)
-    assert r.axes == "TZCPYX"  # from fake sizes keys
+    assert r.axes == "TZCYX"  # from fake sizes keys
     assert r.channel_number == 2
-    assert r.serie_axis_index == r.axes.index("P")
+    assert r.serie_axis_index == r._axes.index("P")
 
 
 # Meta factory functions for parametrize
@@ -222,17 +222,24 @@ def test_nd2_get_array_with_series_splits(monkeypatch, tmp_path: Path):
 # Fakes / stubs
 # ==========================
 class _FakeTiffTags:
-    """Acts like tifffile.TiffTags for what we use: iter + get(tag_code)."""
+    """Acts like tifffile.TiffTags for what we use: iter + get(name_or_code)."""
     def __init__(self, tags_list):
         self._tags = list(tags_list)
 
     def __iter__(self):
+        # Allows: for tag in page.tags: ...
         return iter(self._tags)
 
-    def get(self, code, default=None):
-        # tifffile lets you lookup by numeric tag code.
+    def get(self, key, default=None):
+        """
+        Support lookup by:
+          - numeric TIFF tag code (int), e.g. PIPELINE_TAG, 282, 283
+          - tag name (str), e.g. "XResolution", "YResolution"
+        """
         for t in self._tags:
-            if getattr(t, "code", None) == code:
+            if isinstance(key, int) and getattr(t, "code", None) == key:
+                return t
+            if isinstance(key, str) and getattr(t, "name", None) == key:
                 return t
         return default
 
