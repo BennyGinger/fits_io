@@ -2,9 +2,10 @@ from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 import json
 from pathlib import Path
-from typing import Any, Mapping, Type, cast
+from typing import Any, Mapping, Sequence, Type, cast
 import logging
 
+from fits_io.reader_utility import read_tiff_channels
 import nd2
 from nd2.structures import Channel, ExpLoop, ChannelMeta, Volume
 from tifffile import TiffFile, TiffPage, imread, TiffPageSeries
@@ -80,6 +81,11 @@ class ImageReader(ABC):
     @abstractmethod
     def get_array(self) -> NDArray | list[NDArray]:
         """Return the image data as a NumPy array."""
+        ...
+    
+    @abstractmethod
+    def get_channel(self, channel: int | str | Sequence[int | str]) -> NDArray:
+        """Return the selected channel(s) as a NumPy array. Channel can be specified by index or label."""
         ...
 
 @dataclass(slots=True)
@@ -176,7 +182,10 @@ class Nd2Reader(ImageReader):
 
         series_lst = np.split(arr, arr.shape[axis], axis=axis)
         return [s.squeeze(axis=axis) for s in series_lst]
-        
+    
+    def get_channel(self, channel: int | str | Sequence[int | str]) -> NDArray:
+        logger.info("Reading channel(s) from .nd2 file is not yet implemented")
+        raise NotImplementedError("Channel reading from .nd2 files is not yet implemented")
     
 @dataclass
 class TiffReader(ImageReader):
@@ -274,7 +283,13 @@ class TiffReader(ImageReader):
         series_lst = np.split(arr, arr.shape[self.serie_axis_index], axis=self.serie_axis_index)
         return [s.squeeze(axis=self.serie_axis_index) for s in series_lst]
 
-
+    def get_channel(self, channel: int | str | Sequence[int | str]) -> NDArray:
+        return read_tiff_channels(
+            self.img_path,
+            channel,
+            channel_labels=self.channel_labels,
+        )
+    
 class ImageReaderError(Exception):
     """Base exception for reader-related errors."""
 
@@ -316,10 +331,10 @@ def get_reader(path: str | Path) -> ImageReader:
 
 if __name__ == "__main__":
     
-    tif_path = Path('/home/ben/Docker_mount/Test_images/nd2/Run2/test.tiff')
+    tif_path = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/nd2/Run2_test/control/c2z25t23v1_nd2_s1/fits_array.tif')
     
     
-    # rtif = get_reader(tif_path)
+    rtif = get_reader(tif_path)
     # print(rtif.channel_number)
     # print(rtif.serie_axis_index)
     # print(rtif.resolution)
