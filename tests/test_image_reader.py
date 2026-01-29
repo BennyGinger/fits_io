@@ -11,7 +11,7 @@ import fits_io.image_reader as m
 
 def test_get_reader_missing_file_raises(tmp_path: Path):
     p = tmp_path / "missing.tif"
-    with pytest.raises(m.FileNotFoundError):
+    with pytest.raises(m.ReaderFileNotFoundError):
         m.get_reader(p)
 
 
@@ -147,9 +147,9 @@ def _Meta_channels_calib():
 @pytest.mark.parametrize(
     "meta_factory, expected",
     [
-        (_Meta_no_channels, (1.0, 1.0)),
-        (_Meta_channels_no_volume, (1.0, 1.0)),
-        (_Meta_channels_no_calib, (1.0, 1.0)),
+        (_Meta_no_channels, None),
+        (_Meta_channels_no_volume, None),
+        (_Meta_channels_no_calib, None),
         (_Meta_channels_calib, (0.3223, 0.3223)),
     ],
 )

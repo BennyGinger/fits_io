@@ -5,14 +5,14 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence, Type, cast
 import logging
 
-from fits_io.reader_utility import read_tiff_channels
+from fits_io.tiff_channel_io import read_tiff_channels
 import nd2
 from nd2.structures import Channel, ExpLoop, ChannelMeta, Volume
 from tifffile import TiffFile, TiffPage, imread, TiffPageSeries
 from numpy.typing import NDArray
 import numpy as np
 
-from fits.provenance import PIPELINE_TAG
+from fits_io.provenance import FITS_TAG
 from fits_io._types import PixelSize
 
 
@@ -62,7 +62,7 @@ class ImageReader(ABC):
     
     @property
     @abstractmethod
-    def resolution(self) -> PixelSize:
+    def resolution(self) -> PixelSize | None:
         """Return the resolution (um per pixel) for (x,y) axes. If none available, return (1.,1.)."""
         ...
     
@@ -74,13 +74,13 @@ class ImageReader(ABC):
     
     @property
     @abstractmethod
-    def custom_metadata(self) -> Mapping[str, Any] | None:
-        """Return custom metadata, if any, associated with the custom pipeline saved under extratags, or None if not available."""
+    def custom_metadata(self) -> Mapping[str, Any]:
+        """Return custom metadata, if any, associated with the custom pipeline saved under extratags, or empty dict if not available."""
         ...
     
     @abstractmethod
     def get_array(self) -> NDArray | list[NDArray]:
-        """Return the image data as a NumPy array."""
+        """Return the image data as a NumPy array. If multiple series, return a list of arrays."""
         ...
     
     @abstractmethod
@@ -138,21 +138,19 @@ class Nd2Reader(ImageReader):
         return self._axes.index('P')
             
     @property
-    def resolution(self) -> PixelSize:
-        default_res = (1., 1.)
-        
+    def resolution(self) -> PixelSize | None:
         if self._channels is None:
-            return default_res
+            return None
         
         ch0 = self._channels[0]
         vol: Volume | None = getattr(ch0, "volume", None)
         if vol is None:
-            return default_res
+            return None
 
         # (x, y, z)
         calib: tuple[float, float, float] | None = getattr(vol, "axesCalibration", None)
         if not calib:
-            return default_res
+            return None
 
         x_um_per_pix, y_um_per_pix = calib[:2]
         return (round(float(x_um_per_pix), 4), round(float(y_um_per_pix), 4))
@@ -169,19 +167,18 @@ class Nd2Reader(ImageReader):
             return round(loop0.parameters.periods[0].periodMs/1000)
     
     @property
-    def custom_metadata(self) -> Mapping[str, Any] | None:
+    def custom_metadata(self) -> Mapping[str, Any]:
         logger.info(".nd2 file do not have custom metadata saved")
-        return None
+        return {}
     
     def get_array(self) -> NDArray | list[NDArray]:
         arr = nd2.imread(self.img_path)
         
-        axis = self.serie_axis_index
-        if axis is None:
+        if self.serie_axis_index is None:
             return arr
 
-        series_lst = np.split(arr, arr.shape[axis], axis=axis)
-        return [s.squeeze(axis=axis) for s in series_lst]
+        series_lst = np.split(arr, arr.shape[self.serie_axis_index], axis=self.serie_axis_index)
+        return [s.squeeze(axis=self.serie_axis_index) for s in series_lst]
     
     def get_channel(self, channel: int | str | Sequence[int | str]) -> NDArray:
         logger.info("Reading channel(s) from .nd2 file is not yet implemented")
@@ -207,7 +204,7 @@ class TiffReader(ImageReader):
             self._page0 = cast(TiffPage, tif.pages[0]) # for typing purposes
             self._imageJ_meta = tif.imagej_metadata or {}
             
-            meta = self._page0.tags.get(PIPELINE_TAG)
+            meta = self._page0.tags.get(FITS_TAG)
             if meta is None:
                 self._custom_metadata = None
             else:
@@ -217,7 +214,7 @@ class TiffReader(ImageReader):
                 try:
                     self._custom_metadata = json.loads(v)
                 except Exception:
-                    logger.warning("PIPELINE_TAG present but not valid JSON")
+                    logger.warning("FITS_TAG present but not valid JSON")
                     self._custom_metadata = None
             
     @property
@@ -255,12 +252,12 @@ class TiffReader(ImageReader):
         return self._axes.index('S')
     
     @property
-    def resolution(self) -> PixelSize:
+    def resolution(self) -> PixelSize | None:
         x_res = self._page0.tags.get('XResolution')
         y_res = self._page0.tags.get('YResolution')
         
         if x_res is None or y_res is None:
-            return (1., 1.)
+            return None
         
         xres = x_res.value[0]/x_res.value[1]
         x_um_per_pix = round(1./float(xres), 4)
@@ -273,7 +270,9 @@ class TiffReader(ImageReader):
         return self._imageJ_meta.get('finterval', None)
     
     @property
-    def custom_metadata(self) -> Mapping[str, Any] | None:
+    def custom_metadata(self) -> Mapping[str, Any]:
+        if self._custom_metadata is None:
+            return {}
         return self._custom_metadata
     
     def get_array(self) -> NDArray | list[NDArray]:
@@ -284,6 +283,8 @@ class TiffReader(ImageReader):
         return [s.squeeze(axis=self.serie_axis_index) for s in series_lst]
 
     def get_channel(self, channel: int | str | Sequence[int | str]) -> NDArray:
+        if "S" in self._axes:
+            raise NotImplementedError("Channel reading from multi-series TIFF files is not yet implemented")
         return read_tiff_channels(
             self.img_path,
             channel,
@@ -294,7 +295,7 @@ class ImageReaderError(Exception):
     """Base exception for reader-related errors."""
 
 
-class FileNotFoundError(ImageReaderError):
+class ReaderFileNotFoundError(ImageReaderError):
     pass
 
 
@@ -313,7 +314,7 @@ def get_reader(path: str | Path) -> ImageReader:
     p = Path(path)
     
     if not p.exists() or not p.is_file():
-        raise FileNotFoundError(f"Path not found or is not a file: {p}")
+        raise ReaderFileNotFoundError(f"Path not found or is not a file: {p}")
     
     suffix = p.suffix.lower()
 
@@ -331,13 +332,13 @@ def get_reader(path: str | Path) -> ImageReader:
 
 if __name__ == "__main__":
     
-    tif_path = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/nd2/Run2_test/control/c2z25t23v1_nd2_s1/fits_array.tif')
+    tif_path = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run2/test.tif')
     
     
     rtif = get_reader(tif_path)
     # print(rtif.channel_number)
     # print(rtif.serie_axis_index)
-    # print(rtif.resolution)
+    print(rtif.resolution)
     # print(rtif.interval)
     # print(rtif.axes)
     # arrs = rtif.get_array()

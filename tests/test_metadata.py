@@ -6,15 +6,18 @@ import pytest
 
 # adjust import if your package path is different
 import fits_io.metadata as md
+from fits_io.provenance import ExportProfile
 
 
 class DummyReader:
     """Minimal ImageReader-like object for build_imagej_metadata tests."""
-    def __init__(self, axes="TZCYX", interval=11.0, channel_number=2, resolution=(0.5, 0.25)):
+    def __init__(self, axes="TZCYX", interval=11.0, channel_number=2, resolution=(0.5, 0.25), custom_metadata=None):
         self.axes = axes
         self.interval = interval
         self.channel_number = channel_number
         self.resolution = resolution
+        self.channel_labels = None
+        self.custom_metadata = custom_metadata or {}
 
 
 # -------------------------
@@ -40,9 +43,9 @@ def test_stackmeta_to_dict_without_interval():
 
 def test_resolutionmeta_default_is_none_density():
     r = md.ResolutionMeta((1.0, 1.0))
-    assert r.resolution is None
+    assert r.resolution == (1.0, 1.0)  # 1/1.0 = 1.0
     assert r.pixel_size == (1.0, 1.0)
-    assert r.unit == "um"
+    assert r.unit == "micron"
 
 
 def test_resolutionmeta_converts_to_pixel_density():
@@ -122,42 +125,45 @@ def test_channelmeta_to_dict_includes_luts_only_when_present():
 
 def test_build_imagej_metadata_basic_includes_expected_fields():
     reader = DummyReader(axes="TZCYX", interval=11.0, channel_number=2, resolution=(0.5, 0.25))
-    out = md.build_imagej_metadata(cast(md.ImageReader, reader), channel_labels=["GFP", "mCherry"], custom_metadata=None)
+    export_profile = ExportProfile(dist_name="test-dist", step_name="test_step", filename="test.tif")
+    out = md.build_imagej_metadata(cast(md.ImageReader, reader), export_profile, channel_labels=["GFP", "mCherry"])
 
     assert isinstance(out, md.TiffMetadata)
     assert out.imagej_meta["axes"] == "TZCYX"
     assert out.imagej_meta["finterval"] == 11.0
     assert out.imagej_meta["Labels"] == ["GFP", "mCherry"]
-    assert out.imagej_meta["unit"] == "um"  # since resolution != (1,1)
+    assert out.imagej_meta["unit"] == "micron"  # since resolution != (1,1)
     assert out.resolution == (2.0, 4.0)  # density px/um
     assert out.extratags is not None  # resolution is stored in private tag payload
 
 
 def test_build_imagej_metadata_channel_labels_str_becomes_list():
     reader = DummyReader(channel_number=1)
-    out = md.build_imagej_metadata(cast(md.ImageReader, reader), channel_labels="GFP")
+    export_profile = ExportProfile(dist_name="test-dist", step_name="test_step", filename="test.tif")
+    out = md.build_imagej_metadata(cast(md.ImageReader, reader), export_profile, channel_labels="GFP")
     assert out.imagej_meta["Labels"] == ["GFP"]
 
 
 def test_build_imagej_metadata_no_resolution_means_no_unit_and_no_resolution_payload():
     reader = DummyReader(resolution=(1.0, 1.0))
-    out = md.build_imagej_metadata(cast(md.ImageReader, reader), channel_labels=None, custom_metadata=None)
+    export_profile = ExportProfile(dist_name="test-dist", step_name="test_step", filename="test.tif")
+    out = md.build_imagej_metadata(cast(md.ImageReader, reader), export_profile, channel_labels=None)
 
-    assert out.resolution is None
-    assert "unit" not in out.imagej_meta
+    assert out.resolution == (1.0, 1.0)
+    assert out.imagej_meta["unit"] == "micron"
     # provenance is always written now
     assert out.extratags is not None
     assert len(out.extratags) == 1
 
     tag, dtype, count, value, writeonce = out.extratags[0]
-    assert tag == md.PIPELINE_TAG  # or PIPELINE_TAG if you import it
+    assert tag == md.FITS_TAG  # or PIPELINE_TAG if you import it
     assert dtype == "B"
     assert count == len(value)
     assert writeonce is True
 
     payload = json.loads(value.decode("utf-8"))
-    assert md.STEP_NAME in payload
-    step_meta = payload[md.STEP_NAME]
+    assert export_profile.step_name in payload
+    step_meta = payload[export_profile.step_name]
 
     # basic provenance keys exist
     assert "dist" in step_meta
@@ -169,16 +175,17 @@ def test_build_imagej_metadata_no_resolution_means_no_unit_and_no_resolution_pay
 
 
 def test_build_imagej_metadata_custom_metadata_only_creates_extratags():
-    reader = DummyReader(resolution=(1.0, 1.0))
+    reader = DummyReader(resolution=(1.0, 1.0), custom_metadata={"a": 1, "b": {"c": 2}})
+    export_profile = ExportProfile(dist_name="test-dist", step_name="test_step", filename="test.tif")
     out = md.build_imagej_metadata(
         cast(md.ImageReader, reader),
-        custom_metadata={"a": 1, "b": {"c": 2}},
+        export_profile,
     )
 
     assert out.extratags is not None
     (tag_id, tiff_dtype, count, value, writeonce) = out.extratags[0]
 
-    assert tag_id == md.PIPELINE_TAG
+    assert tag_id == md.FITS_TAG
     assert tiff_dtype == "B"
     assert isinstance(value, (bytes, bytearray))
     assert count == len(value)
@@ -191,8 +198,8 @@ def test_build_imagej_metadata_custom_metadata_only_creates_extratags():
     assert payload["b"] == {"c": 2}
 
     # provenance step is also present
-    assert md.STEP_NAME in payload
-    step_meta = payload[md.STEP_NAME]
+    assert export_profile.step_name in payload
+    step_meta = payload[export_profile.step_name]
     assert "dist" in step_meta
     assert "version" in step_meta
     assert "timestamp" in step_meta
@@ -204,16 +211,14 @@ def test_build_imagej_metadata_custom_metadata_only_creates_extratags():
 
 def test_build_imagej_metadata_resolution_payload_is_pixel_size_um_per_px():
     reader = DummyReader(resolution=(0.5, 0.25))
-    out = md.build_imagej_metadata(cast(md.ImageReader, reader), custom_metadata={"x": "y"})
+    export_profile = ExportProfile(dist_name="test-dist", step_name="test_step", filename="test.tif")
+    out = md.build_imagej_metadata(cast(md.ImageReader, reader), export_profile, extra_step_metadata={"resolution": (0.5, 0.25)})
     assert out.extratags is not None
 
     raw = out.extratags[0][3]
     payload = json.loads(raw.decode("utf-8"))
 
     # resolution is stored under the step, as pixel size (um/px)
-    step_meta = payload[md.STEP_NAME]
+    step_meta = payload[export_profile.step_name]
     assert step_meta["resolution"] == [0.5, 0.25] or step_meta["resolution"] == (0.5, 0.25)
-
-    # and your previous metadata remains top-level
-    assert payload["x"] == "y"
 

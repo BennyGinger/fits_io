@@ -6,12 +6,10 @@ import json
 from numpy.typing import NDArray
 import numpy as np
 
-from fits.provenance import PIPELINE_TAG, add_step
+from fits_io.provenance import FITS_TAG, add_provenance_profile, ExportProfile
 from fits_io.image_reader import ImageReader
 from fits_io._types import ExtraTags, PixelSize, PixelDensity
 
-STEP_NAME = 'fits_io.convert'
-DIST_NAME = "fits-io"
 
 LABEL_TO_COLOR = {
     "green": 'green',
@@ -22,6 +20,7 @@ LABEL_TO_COLOR = {
     "mcherry": 'red',
     "tritc": 'red',
     "rfp": 'red',
+    "blue": 'blue',
     "bfp": 'blue',
     "dapi": 'blue',
 }
@@ -40,21 +39,31 @@ class StackMeta:
 
 
 class ResolutionMeta: 
-    def __init__(self, resolution: PixelSize) -> None:
+    def __init__(self, resolution: PixelSize | None) -> None:
         self._resolution = resolution # e.g. um/pixel
-        self.unit = 'um'
+        self._unit = 'pixel'  # default unit
     
     @property
     def resolution(self) -> PixelDensity | None:
         """Return pixel per unit resulution for imagej (pixel density)"""
-        if self._resolution == (1., 1.):
+        if self._resolution is None:
             return None
         return (1/self._resolution[0], 1/self._resolution[1])
     
     @property
-    def pixel_size(self) -> PixelSize:
-        """Return pixel size in um."""
+    def pixel_size(self) -> PixelSize | None:
+        """Return pixel size in um, if available."""
         return self._resolution
+    
+    @property
+    def unit(self) -> str:
+        """Return unit string for ImageJ metadata."""
+        if self._resolution is None:
+            return 'pixel'
+        return 'micron'
+    
+    def to_dict(self) -> dict[str, Any]:
+        return {'unit': self.unit}
 
 
 def make_color_lut(color: str) -> NDArray[np.uint8]:
@@ -73,9 +82,9 @@ class ChannelMeta:
     luts: list[NDArray[np.uint8]] | None = field(init=False)
     
     def __post_init__(self):
-        if self.labels is None:
+        if self.labels is None or self.labels == 'initialize':
             self.mode, self.luts = 'grayscale', None
-            self.labels = [f"C{i+1}" for i in range(self.channel_number)]
+            self.labels = self.init_labels()
             return
         
         if isinstance(self.labels, str):
@@ -91,7 +100,9 @@ class ChannelMeta:
         else:
             self.mode, self.luts = 'color', [make_color_lut(c) for c in colors if c is not None]
     
-            
+    def init_labels(self) -> list[str]:
+        return [f"C{i+1}" for i in range(self.channel_number)]
+         
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any]=  {}
         d['Labels'] = self.labels
@@ -110,43 +121,42 @@ class TiffMetadata:
     extratags: ExtraTags | None = None
 
 
-
-def build_imagej_metadata(img_reader: ImageReader, *, channel_labels: str | Sequence[str] | None = None, custom_metadata: Mapping[str, Any] | None = None, extra_step_metadata: Mapping[str, Any] | None = None) -> TiffMetadata:
+def build_imagej_metadata(img_reader: ImageReader, export_profile: ExportProfile, *, channel_labels: str | Sequence[str] | None = None, extra_step_metadata: Mapping[str, Any] | None = None,) -> TiffMetadata:
     """
     Build ImageJ-compatible metadata for saving TIFF files.
     
     Args:
         img_reader: An ImageReader instance to read metadata from.
         channel_labels: Optional; either a single string label or a sequence of labels for each channel. If None, default labels will be used.
-        custom_metadata: Optional existing metadata associated with previous steps to include under the private tag.
         extra_step_metadata: Optional mapping of additional metadata to include in the processing step.
     
     Returns:
         TiffMetadata object containing metadata, resolution, and extra tags.
     """
+    
+    input_channel_labels = img_reader.channel_labels
+    if channel_labels is not None:
+        input_channel_labels = channel_labels
+    
     # extract metadata components
     stack_meta = StackMeta(axes=img_reader.axes, finterval=img_reader.interval)
-    channel_meta = ChannelMeta(channel_number=img_reader.channel_number, labels=channel_labels)
+    channel_meta = ChannelMeta(channel_number=img_reader.channel_number, labels=input_channel_labels)
+    resolution_meta = ResolutionMeta(img_reader.resolution)
     
     # build final metadata dict
     metadata_dict = stack_meta.to_dict()
     metadata_dict.update(channel_meta.to_dict())
-    
-    # add resolution info
-    resolution_meta = ResolutionMeta(img_reader.resolution)
-    if resolution_meta.resolution is not None:
-        metadata_dict['unit'] = resolution_meta.unit
+    metadata_dict.update(resolution_meta.to_dict())
     
     # build custom metadata to be stored in private tag
     extratags: ExtraTags | None = None
-    payload = add_step(custom_metadata, dist_name=DIST_NAME, step=STEP_NAME)
-    if resolution_meta.resolution is not None:
-        payload[STEP_NAME]['resolution'] = resolution_meta.pixel_size
+    existing_metadata = img_reader.custom_metadata
+    payload = add_provenance_profile(existing_metadata, export_profile=export_profile)
     if extra_step_metadata is not None:
-        payload[STEP_NAME].update(extra_step_metadata)
+        payload[export_profile.step_name].update(extra_step_metadata)
     if payload:
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        extratags = [(PIPELINE_TAG, "B", len(raw), raw, True)]
+        extratags = [(FITS_TAG, "B", len(raw), raw, True)]
     
     return TiffMetadata(
         imagej_meta=metadata_dict,
@@ -170,8 +180,8 @@ if __name__ == '__main__':
     
     # Test
     t1 = time()
-    img_path = Path('/home/ben/Docker_mount/Test_images/tiff/Run2/simple.tif')
-    save_path = Path('/home/ben/Docker_mount/Test_images/tiff/Run2/test.tif')
+    img_path = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run2/c2z25t23v1_tif.tif')
+    save_path = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run2/test.tif')
     img = imread(img_path)
     imwrite(save_path,
             img,
@@ -186,7 +196,7 @@ if __name__ == '__main__':
                 },
             resolution=(1/0.3223335, 1/0.3223335),
             predictor=2,
-            extratags=[(PIPELINE_TAG, "s", 0, payload, True)],
+            extratags=[(FITS_TAG, "s", 0, payload, True)],
             compression='zlib',
     )
     
