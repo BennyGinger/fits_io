@@ -97,6 +97,55 @@ def test_tiff_get_array_with_series_splits(monkeypatch, tmp_path: Path):
     assert len(out) == 2
     assert out[0].shape == (5, 6)  # squeezed S axis
 
+def test_tiff_status_reads_valid_flag(monkeypatch, tmp_path: Path):
+    p = tmp_path / "x.tif"
+    p.write_bytes(b"fake")
+
+    def _FakeTiffFile_status_skip(path):
+        ij = {"Info": "fits_io.status: skip\n"}
+        return _FakeTiff(axes="YX", shape=(5, 6), tags=[], imagej_metadata=ij)
+
+    monkeypatch.setattr(m, "TiffFile", _FakeTiffFile_status_skip)
+
+    r = m.TiffReader(p)
+    assert r.status == "skip"
+    assert r.export_status == "fits_io.status: skip\n"
+
+
+@pytest.mark.parametrize(
+    "imagej_metadata",
+    [
+        None,
+        {},
+        {"Info": "Converted from FITS\n"},  # wrong prefix
+    ],
+)
+def test_tiff_status_defaults_when_missing_or_wrong_prefix(monkeypatch, tmp_path: Path, imagej_metadata):
+    p = tmp_path / "x.tif"
+    p.write_bytes(b"fake")
+
+    def _FakeTiffFile_with_ij(path):
+        return _FakeTiff(axes="YX", shape=(5, 6), tags=[], imagej_metadata=imagej_metadata)
+
+    monkeypatch.setattr(m, "TiffFile", _FakeTiffFile_with_ij)
+
+    r = m.TiffReader(p)
+    assert r.status == m.DEFAULT_FLAG  # "active"
+
+
+def test_tiff_status_defaults_when_invalid_flag(monkeypatch, tmp_path: Path):
+    p = tmp_path / "x.tif"
+    p.write_bytes(b"fake")
+
+    def _FakeTiffFile_status_invalid(path):
+        ij = {"Info": "fits_io.status: banana\n"}
+        return _FakeTiff(axes="YX", shape=(5, 6), tags=[], imagej_metadata=ij)
+
+    monkeypatch.setattr(m, "TiffFile", _FakeTiffFile_status_invalid)
+
+    r = m.TiffReader(p)
+    assert r.status == m.DEFAULT_FLAG  # "active"
+
 
 # --------------------------
 # Nd2Reader behavior
