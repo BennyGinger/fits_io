@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 import json
 from pathlib import Path
-from typing import Any, Mapping, Sequence, Type, cast
+from typing import Any, Literal, Mapping, Sequence, Type, cast
 import logging
 
 from fits_io.tiff_channel_io import read_tiff_channels
@@ -15,6 +15,10 @@ import numpy as np
 from fits_io.provenance import FITS_TAG
 from fits_io._types import PixelSize
 
+
+StatusFlag = Literal["active", "skip"]
+ALLOWED_FLAGS: set[StatusFlag] = {"active", "skip"}
+DEFAULT_FLAG: StatusFlag = "active"
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +38,18 @@ class ImageReader(ABC):
     @abstractmethod
     def axes(self) -> str:
         """Return the axes string for the image data."""
+        ...
+    
+    @property
+    @abstractmethod
+    def status(self) -> str:
+        """Return the status of the image for downstream processing (i.e., 'active' or 'skip')."""
+        ...
+    
+    @property
+    @abstractmethod
+    def export_status(self,) -> str:
+        """Return the export status string for the image."""
         ...
     
     @property
@@ -111,6 +127,14 @@ class Nd2Reader(ImageReader):
     @property
     def axes(self) -> str:
         return self._axes.replace('P', '')  # Remove 'P' axis for series handling.
+    
+    @property
+    def status(self) -> str:
+        return 'active'  # nd2 files do not have status info; default to 'active'
+    
+    @property
+    def export_status(self,) -> str:
+        return DEFAULT_FLAG
     
     @property
     def channel_number(self) -> int:
@@ -191,6 +215,7 @@ class TiffReader(ImageReader):
     _axes: str = field(init=False)
     _page0: TiffPage = field(init=False)
     _imageJ_meta: dict[str, Any] = field(init=False)
+    _status: StatusFlag = field(init=False)
     _custom_metadata: Mapping[str, Any] | None = field(init=False)
     
     @classmethod
@@ -217,9 +242,29 @@ class TiffReader(ImageReader):
                     logger.warning("FITS_TAG present but not valid JSON")
                     self._custom_metadata = None
             
+        self._status = self._get_status_from_metadata()
+    
+    def _get_status_from_metadata(self) -> StatusFlag:
+        info = self._imageJ_meta.get("Info")
+        prefix = "fits_io.status: "
+
+        if not info or not info.startswith(prefix) or not isinstance(info, str):
+            return DEFAULT_FLAG
+
+        flag = info[len(prefix):].strip()
+        return flag if flag in ALLOWED_FLAGS else DEFAULT_FLAG
+     
     @property
     def axes(self) -> str:
         return self._axes.replace('S', '')  # Remove 'S' axis for series handling.
+    
+    @property
+    def status(self) -> StatusFlag:
+        return self._status
+    
+    @property
+    def export_status(self,) -> str:
+        return f"fits_io.status: {self._status}\n"
     
     @property
     def channel_number(self) -> int:

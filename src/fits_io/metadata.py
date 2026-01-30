@@ -10,29 +10,55 @@ from fits_io.provenance import FITS_TAG, add_provenance_profile, ExportProfile
 from fits_io.image_reader import ImageReader
 from fits_io._types import ExtraTags, PixelSize, PixelDensity
 
+COLOR_MAP = {
+        "red":     (1, 0, 0),
+        "green":   (0, 1, 0),
+        "blue":    (0, 0, 1),
+        "cyan":    (0, 1, 1),
+        "magenta": (1, 0, 1),
+        "yellow":  (1, 1, 0),
+        "gray":    (1, 1, 1),
+    }
 
 LABEL_TO_COLOR = {
-    "green": 'green',
-    "gfp": 'green',
-    "egfp": 'green',
-    "fitc": 'green',
-    "red": 'red',
-    "mcherry": 'red',
-    "tritc": 'red',
-    "rfp": 'red',
     "blue": 'blue',
     "bfp": 'blue',
     "dapi": 'blue',
+    "cyan": 'cyan',
+    "cfp": 'cyan',
+    "yellow": 'yellow',
+    "cy3": 'yellow',
+    "green": 'green',
+    "gcamp": 'green',
+    "gfp": 'green',
+    "egfp": 'green',
+    "fitc": 'green',
+    "magenta": 'magenta',
+    "mch": 'magenta',
+    "ired": 'magenta',
+    "irfp": 'magenta',
+    "red": 'red',
+    "pinky": 'red',
+    "mkate2": 'red',
+    "scarlet": 'red',
+    "geco": 'red',
+    "mcherry": 'red',
+    "tritc": 'red',
+    "rfp": 'red',
+    'gray': 'gray',
+    'grey': 'gray',
 }
 
 
 @dataclass
 class StackMeta:
     axes: str
+    status: str
     finterval: float | None
     
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any]=  {'axes': self.axes}
+        d: dict[str, Any]=  {'axes': self.axes,
+                             'Info': self.status}
         if self.finterval is not None:
             d['finterval'] = self.finterval
         return d
@@ -68,10 +94,13 @@ class ResolutionMeta:
 
 def make_color_lut(color: str) -> NDArray[np.uint8]:
     """Return ImageJ-style LUT: shape (3, 256), uint8."""
-    lut = np.zeros((3, 256), dtype=np.uint8)
-    channel_index = {"red": 0, "green": 1, "blue": 2}[color]
-    lut[channel_index] = np.arange(256, dtype=np.uint8)
-    return lut   
+    
+    try:
+        mask = np.array(COLOR_MAP[color.lower()], dtype=np.uint8)[:, None]
+    except KeyError:
+        raise ValueError(f"Unsupported LUT color: {color}")
+
+    return mask * np.arange(256, dtype=np.uint8)   
 
 
 @dataclass(slots=True)
@@ -94,8 +123,7 @@ class ChannelMeta:
             raise ValueError(f"Expected {self.channel_number} labels, got {len(self.labels)}")
         
         colors = [LABEL_TO_COLOR.get(lbl.lower(), None) for lbl in self.labels]
-        VALID = {"red","green","blue"}
-        if any(c not in VALID for c in colors):
+        if any(c not in COLOR_MAP for c in colors):
             self.mode, self.luts = 'grayscale', None
         else:
             self.mode, self.luts = 'color', [make_color_lut(c) for c in colors if c is not None]
@@ -139,7 +167,9 @@ def build_imagej_metadata(img_reader: ImageReader, export_profile: ExportProfile
         input_channel_labels = channel_labels
     
     # extract metadata components
-    stack_meta = StackMeta(axes=img_reader.axes, finterval=img_reader.interval)
+    stack_meta = StackMeta(axes=img_reader.axes, 
+                           status=img_reader.export_status,
+                           finterval=img_reader.interval)
     channel_meta = ChannelMeta(channel_number=img_reader.channel_number, labels=input_channel_labels)
     resolution_meta = ResolutionMeta(img_reader.resolution)
     

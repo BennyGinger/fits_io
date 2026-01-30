@@ -8,7 +8,6 @@ from fits_io.image_reader import ImageReader, get_reader
 from fits_io.writer import get_save_dirs, convert_to_fits_tif, save_fits_array
 from fits_io.provenance import create_export_profile
 
-ALLOWED_FILENAMES = {'fits_array.tif', 'fits_mask.tif'}
 
 
 class FitsIO:
@@ -48,7 +47,7 @@ class FitsIO:
         """
         return get_save_dirs(self.reader)
     
-    def convert_to_fits(self, *, channel_labels: str | Sequence[str] | None = None, user_defined_metadata: Mapping[str, Any] | None = None, compression: str | None = 'zlib', overwrite: bool = False) -> None:
+    def convert_to_fits(self, *, channel_labels: str | Sequence[str] | None = None, distribution: str | None = None, step_name: str | None = None, filename: str | None = None, user_defined_metadata: Mapping[str, Any] | None = None, compression: str | None = 'zlib', overwrite: bool = False) -> None:
         """
         Convert an image file to a TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
         Args:
@@ -57,7 +56,8 @@ class FitsIO:
             compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'. Possible values are 'zlib', 'lzma', 'zstd', 'lz4', 'lzw', 'packbits' and 'jpeg'
             overwrite : If True, overwrite existing files. If False and the output file exists, skip conversion, by default False
         """
-        convert_to_fits_tif(self.reader, channel_labels=channel_labels, user_defined_metadata=user_defined_metadata, compression=compression, overwrite=overwrite)
+        export_profile = create_export_profile(self.fits_metadata, distribution, step_name, filename)
+        convert_to_fits_tif(self.reader, channel_labels=channel_labels, export_profile=export_profile,user_defined_metadata=user_defined_metadata, compression=compression, overwrite=overwrite)
 
     def save_fits_array(self, distribution: str | None = None, step_name: str | None = None, filename: str | None = None, user_metadata: Mapping[str, Any] | None = None, compression: str | None = 'zlib', overwrite: bool = False) -> None:
         """
@@ -69,14 +69,11 @@ class FitsIO:
         Args:
             distribution : Optional name of the distribution or package for provenance tracking.
             step_name : Optional name of the processing step for provenance tracking.
-            filename : Optional name of the output TIFF file. Must be one of {'fits_array.tif', 'fits_mask.tif'}.
+            filename : Optional name of the output TIFF file. 
             user_metadata : Additional custom metadata to include in the TIFF file, by default None.
             compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'. Possible values are 'zlib', 'lzma', 'zstd', 'lz4', 'lzw', 'packbits' and 'jpeg'.
             overwrite : If True, overwrite existing files. If False and the output file exists, skip saving, by default False.
         """
-        if filename not in ALLOWED_FILENAMES:
-            raise ValueError(f"Invalid filename '{filename}'. Allowed filenames are: {ALLOWED_FILENAMES}")
-        
         export_profile = create_export_profile(self.fits_metadata, distribution, step_name, filename)
         save_fits_array(self.reader, export_profile=export_profile, user_defined_metadata=user_metadata, compression=compression, overwrite=overwrite)
     

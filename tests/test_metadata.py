@@ -18,6 +18,7 @@ class DummyReader:
         self.resolution = resolution
         self.channel_labels = None
         self.custom_metadata = custom_metadata or {}
+        self.export_status = "active"
 
 
 # -------------------------
@@ -25,15 +26,15 @@ class DummyReader:
 # -------------------------
 
 def test_stackmeta_to_dict_with_interval():
-    s = md.StackMeta(axes="TZCYX", finterval=11.0)
+    s = md.StackMeta(axes="TZCYX", status='active', finterval=11.0)
     d = s.to_dict()
-    assert d == {"axes": "TZCYX", "finterval": 11.0}
+    assert d == {"axes": "TZCYX", 'Info': 'active', "finterval": 11.0}
 
 
 def test_stackmeta_to_dict_without_interval():
-    s = md.StackMeta(axes="YX", finterval=None)
+    s = md.StackMeta(axes="YX", status='active', finterval=None)
     d = s.to_dict()
-    assert d == {"axes": "YX"}
+    assert d == {"axes": "YX", 'Info': 'active'}
     assert "finterval" not in d
 
 

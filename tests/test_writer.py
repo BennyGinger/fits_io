@@ -30,6 +30,12 @@ class DummyReader(ImageReader):
     def axes(self) -> str: 
         return "YX"
     @property
+    def status(self) -> str:
+        return "active"
+    @property
+    def export_status(self) -> str:
+        return "fits_io.status: active\n"
+    @property
     def channel_number(self) -> int: 
         return 1
     @property
