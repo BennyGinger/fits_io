@@ -72,17 +72,21 @@ class FitsIO:
         """
         return get_save_dirs(self.reader)
     
-    def convert_to_fits(self, *, channel_labels: str | Sequence[str] | None = None, distribution: str | None = None, step_name: str | None = None, filename: str | None = None, user_defined_metadata: Mapping[str, Any] | None = None, compression: str | None = 'zlib', overwrite: bool = False) -> None:
+    def convert_to_fits(self, *, channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', distribution: str | None = None, step_name: str | None = None, filename: str | None = None, user_defined_metadata: Mapping[str, Any] | None = None, compression: str | None = 'zlib', overwrite: bool = False) -> None:
         """
         Convert an image file to a TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
         Args:
             channel_labels : Channel labels to include in the metadata. If None, generic labels will be created, by default None
+            export_channels : Channels to export. Can be 'all' or a list of channel labels, by default 'all'
+            distribution : Optional name of the distribution or package for provenance tracking.
+            step_name : Optional name of the processing step for provenance tracking.
+            filename : Optional name of the output TIFF file.
             user_defined_metadata : Additional custom metadata to include in the TIFF file, by default None
             compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'. Possible values are 'zlib', 'lzma', 'zstd', 'lz4', 'lzw', 'packbits' and 'jpeg'
             overwrite : If True, overwrite existing files. If False and the output file exists, skip conversion, by default False
         """
         export_profile = create_export_profile(self.fits_metadata, distribution, step_name, filename)
-        convert_to_fits_tif(self.reader, channel_labels=channel_labels, export_profile=export_profile,user_defined_metadata=user_defined_metadata, compression=compression, overwrite=overwrite)
+        convert_to_fits_tif(self.reader, channel_labels=channel_labels, export_channels=export_channels,export_profile=export_profile,user_defined_metadata=user_defined_metadata, compression=compression, overwrite=overwrite)
 
     def save_fits_array(self, distribution: str | None = None, step_name: str | None = None, filename: str | None = None, user_metadata: Mapping[str, Any] | None = None, compression: str | None = 'zlib', overwrite: bool = False) -> None:
         """

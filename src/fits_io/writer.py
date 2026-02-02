@@ -30,13 +30,48 @@ def _save_tiff(img_array: NDArray, save_path: Path, metadata: TiffMetadata, comp
             compression=compression,
     )
 
-def convert_to_fits_tif(img_reader: ImageReader, *, export_profile: ExportProfile, channel_labels: str | Sequence[str] | None = None, user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib', overwrite: bool = False) -> None:
+def _get_array_to_export(img_reader: ImageReader, channel_labels: str | Sequence[str], export_channels: str | Sequence[str], z_projection: Zproj = None) -> tuple[list[NDArray], list[str]]:
+    # Make sure channel_labels is a list
+    if isinstance(channel_labels, str):
+        channel_labels = [channel_labels]
+    else:
+        channel_labels = list(channel_labels)
+    
+    # Determine which channels to export
+    if isinstance(export_channels, str) and export_channels.lower() in {'all', 'initialize'}:
+        use_all_channels = True
+        selected_channels = channel_labels
+    else:
+        requested = [export_channels] if isinstance(export_channels, str) else list(export_channels)
+        
+        if any(chan not in channel_labels for chan in requested):
+            logger.warning(f"All exported channels {requested} should be in channel labels {channel_labels}.")
+            use_all_channels = True
+            selected_channels = channel_labels
+        else:
+            use_all_channels = False
+            selected_channels = requested
+    
+    # Get the array(s)
+    arrays = (
+        img_reader.get_array(z_projection)
+        if use_all_channels
+        else img_reader.get_channel(selected_channels, z_projection)
+    )
+
+    # Normalize to list[NDArray]
+    arrays = [arrays] if isinstance(arrays, np.ndarray) else list(arrays)
+    
+    return arrays, selected_channels
+
+def convert_to_fits_tif(img_reader: ImageReader, *, export_profile: ExportProfile, channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib', overwrite: bool = False) -> None:
     """
     Convert an image file to a TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
     Args:
         img_reader : An ImageReader instance for the input image.
         channel_labels : Channel labels to include in the metadata. If None, uses labels from the input file, by default None
         export_profile : ExportProfile instance containing distribution and step information.
+        export_channels : Channels to export. Can be 'all' or a list of channel labels, by default 'all'
         user_defined_metadata : Additional custom metadata to include in the TIFF file, by default None
         compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'
         overwrite : If True, overwrite existing files. If False and the output file exists, skip conversion, by default False
@@ -52,22 +87,20 @@ def convert_to_fits_tif(img_reader: ImageReader, *, export_profile: ExportProfil
     if channel_labels is None:
         channel_labels = 'initialize'
     
-    # get metadata
-    build_md = partial(build_imagej_metadata,
-                        img_reader,
-                        export_profile=export_profile,
-                        channel_labels=channel_labels,
-                        extra_step_metadata=user_defined_metadata)
-    
     # Generate save path(s)
     save_dirs = get_save_dirs(img_reader)
     save_dirs = mkdirs_paths(save_dirs)
     save_path_lst = [build_output_path(save_dir, save_name=export_profile.filename) for save_dir in save_dirs]
     
     # Get the image array(s)
-    arrays = img_reader.get_array(z_projection)
-    if isinstance(arrays, np.ndarray):
-        arrays = [arrays]
+    arrays, used_channels = _get_array_to_export(img_reader, channel_labels=channel_labels, export_channels=export_channels, z_projection=z_projection)
+    
+    # get metadata
+    build_md = partial(build_imagej_metadata,
+                        img_reader,
+                        export_profile=export_profile,
+                        channel_labels=used_channels,
+                        extra_step_metadata=user_defined_metadata)
     
     # write tiff with metadata and reader
     if len(arrays) != len(save_path_lst):
@@ -108,7 +141,7 @@ def save_fits_array(img_reader: ImageReader, *, export_profile: ExportProfile, u
     array = img_reader.get_array(z_projection)
     
     if isinstance(array, list):
-        raise ValueError("Expected a single array, but got multiple series. You may need to use convert_to_fits_tif instead.")
+        raise ValueError("Multiple series detected; use convert_to_fits_tif.")
     
     _save_tiff(array, save_path, meta, compression=compression)
 
