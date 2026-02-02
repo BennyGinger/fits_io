@@ -5,7 +5,7 @@ from pathlib import Path
 from numpy.typing import NDArray
 import numpy as np
 
-from fits_io.image_reader import ImageReader
+from fits_io.image_reader import ImageReader, StatusFlag
 import pytest
 
 # Adjust this import to your actual module path
@@ -27,35 +27,37 @@ class DummyReader(ImageReader):
     @classmethod
     def can_read(cls, path: Path) -> bool: ...
     @property
-    def axes(self) -> str: 
-        return "YX"
+    def axes(self) -> list[str]:
+        return ["YX"]
     @property
-    def status(self) -> str:
+    def compression_method(self) -> str | None:
+        return None
+    @property
+    def status(self) -> StatusFlag:
         return "active"
     @property
     def export_status(self) -> str:
         return "fits_io.status: active\n"
     @property
-    def channel_number(self) -> int: 
-        return 1
+    def channel_number(self) -> list[int]:
+        return [1]
     @property
-    def channel_labels(self) -> list[str] | None: 
+    def channel_labels(self) -> list[str] | None:
+        return None
+    def axis_index(self, axis) -> list[int | None]:
+        return [None]
+    @property
+    def resolution(self) -> list[tuple[float, float] | None]:
+        return [(1.0, 1.0)]
+    @property
+    def interval(self) -> float | None:
         return None
     @property
-    def serie_axis_index(self) -> int | None: 
-        return None
-    @property
-    def resolution(self) -> tuple[float, float] | None: 
-        return (1.0, 1.0)
-    @property
-    def interval(self) -> float | None: 
-        return None
-    @property
-    def custom_metadata(self) -> dict: 
+    def custom_metadata(self) -> dict:
         return {}
-    def get_array(self) -> "NDArray | list[NDArray]": 
+    def get_array(self, z_projection=None) -> "NDArray | list[NDArray]":
         return np.zeros((10, 10), dtype=np.uint8)
-    def get_channel(self, channel) -> NDArray: ...
+    def get_channel(self, channel, z_projection=None) -> "NDArray | list[NDArray]": ...
 
 
 def test_build_output_path_joins_series_dir_and_save_name(tmp_path: Path) -> None:

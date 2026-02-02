@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Any, Literal, Mapping, Sequence, Type, cast
 import logging
 
-from fits_io.tiff_channel_io import read_tiff_channels
+from fits_io.tiff_axis_io import apply_z_projection, read_tiff_channels
 import nd2
 from nd2.structures import Channel, ExpLoop, ChannelMeta, Volume
-from tifffile import TiffFile, TiffPage, imread, TiffPageSeries
+from tifffile import TiffFile, TiffPage, TiffWriter, imread, COMPRESSION, TiffTag
 from numpy.typing import NDArray
 import numpy as np
 
@@ -19,8 +19,20 @@ from fits_io._types import PixelSize
 StatusFlag = Literal["active", "skip"]
 ALLOWED_FLAGS: set[StatusFlag] = {"active", "skip"}
 DEFAULT_FLAG: StatusFlag = "active"
+DEFAULT_FLAG_PREFIX = "fits_io.status: "
+Zproj = Literal['max', 'mean', None]
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class StatusProfile:
+    """Class to represent status profile information to be exported."""
+    status: StatusFlag
+    prefix: str = DEFAULT_FLAG_PREFIX
+    
+    @property
+    def export(self) -> str:
+        return f"{self.prefix}{self.status}\n"
 
 @dataclass
 class ImageReader(ABC):
@@ -36,13 +48,19 @@ class ImageReader(ABC):
 
     @property
     @abstractmethod
-    def axes(self) -> str:
-        """Return the axes string for the image data."""
+    def axes(self) -> list[str]:
+        """Return the axes string for the image data"""
         ...
     
     @property
     @abstractmethod
-    def status(self) -> str:
+    def compression_method(self) -> str | None:
+        """Return the compression method used for the image data, or None if uncompressed."""
+        ...
+    
+    @property
+    @abstractmethod
+    def status(self) -> StatusFlag:
         """Return the status of the image for downstream processing (i.e., 'active' or 'skip')."""
         ...
     
@@ -54,8 +72,8 @@ class ImageReader(ABC):
     
     @property
     @abstractmethod
-    def channel_number(self) -> int:
-        """Return the number of channels in the image."""
+    def channel_number(self) -> list[int]:
+        """Return the number of channels in the image for each series, or 1 if not applicable."""
         ...
     
     @property
@@ -70,16 +88,15 @@ class ImageReader(ABC):
         """Return the number of series in the image, or 1 if not applicable."""
         ...
     
-    @property
     @abstractmethod
-    def serie_axis_index(self) -> int | None:
-        """Return the index of the 'serie' axis in the axes string, or None if not present."""
+    def axis_index(self, axis: Literal['P', 'C', 'Z', 'T', 'X', 'Y']) -> list[int | None]:
+        """Return a list of indices of the specified axis, or None if not present, for each series."""
         ...
     
     @property
     @abstractmethod
-    def resolution(self) -> PixelSize | None:
-        """Return the resolution (um per pixel) for (x,y) axes. If none available, return (1.,1.)."""
+    def resolution(self) -> list[PixelSize | None]:
+        """Return a list of resolution (um per pixel) for (x,y) axes. If none available, return (1.,1.), for each series."""
         ...
     
     @property
@@ -95,13 +112,13 @@ class ImageReader(ABC):
         ...
     
     @abstractmethod
-    def get_array(self) -> NDArray | list[NDArray]:
+    def get_array(self, z_projection: Zproj = None) -> NDArray | list[NDArray]:
         """Return the image data as a NumPy array. If multiple series, return a list of arrays."""
         ...
     
     @abstractmethod
-    def get_channel(self, channel: int | str | Sequence[int | str]) -> NDArray:
-        """Return the selected channel(s) as a NumPy array. Channel can be specified by index or label."""
+    def get_channel(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> NDArray | list[NDArray]:
+        """Return the selected channel(s) as a NumPy array or list of arrays. Channel can be specified by index or label."""
         ...
 
 @dataclass(slots=True)
@@ -125,20 +142,24 @@ class Nd2Reader(ImageReader):
             self._exploop = file.experiment
     
     @property
-    def axes(self) -> str:
-        return self._axes.replace('P', '')  # Remove 'P' axis for series handling.
+    def axes(self) -> list[str]:
+        return [self._axes.replace('P', '')]  # Remove 'P' axis for series handling.
     
     @property
-    def status(self) -> str:
+    def compression_method(self) -> str | None:
+        return None  # nd2 files are never compressed
+    
+    @property
+    def status(self) -> StatusFlag:
         return 'active'  # nd2 files do not have status info; default to 'active'
     
     @property
     def export_status(self,) -> str:
-        return DEFAULT_FLAG
+        return StatusProfile(status=DEFAULT_FLAG).export
     
     @property
-    def channel_number(self) -> int:
-        return self._sizes.get('C', 1)
+    def channel_number(self) -> list[int]:
+        return [self._sizes.get('C', 1)]
     
     @property
     def channel_labels(self) -> list[str] | None:
@@ -155,29 +176,28 @@ class Nd2Reader(ImageReader):
     def series_number(self) -> int:
         return self._sizes.get('P', 1)
     
-    @property
-    def serie_axis_index(self) -> int | None:
-        if 'P' not in self._axes:
-            return None
-        return self._axes.index('P')
+    def axis_index(self, axis: Literal['P', 'C', 'Z', 'T', 'X', 'Y']) -> list[int | None]:
+        if axis not in self._axes:
+            return [None]
+        return [self._axes.index(axis)]
             
     @property
-    def resolution(self) -> PixelSize | None:
+    def resolution(self) -> list[PixelSize | None]:
         if self._channels is None:
-            return None
+            return [None]
         
         ch0 = self._channels[0]
         vol: Volume | None = getattr(ch0, "volume", None)
         if vol is None:
-            return None
+            return [None]
 
         # (x, y, z)
         calib: tuple[float, float, float] | None = getattr(vol, "axesCalibration", None)
         if not calib:
-            return None
+            return [None]
 
         x_um_per_pix, y_um_per_pix = calib[:2]
-        return (round(float(x_um_per_pix), 4), round(float(y_um_per_pix), 4))
+        return [(round(float(x_um_per_pix), 4), round(float(y_um_per_pix), 4))]
         
     @property
     def interval(self) -> float | None:
@@ -195,25 +215,31 @@ class Nd2Reader(ImageReader):
         logger.info(".nd2 file do not have custom metadata saved")
         return {}
     
-    def get_array(self) -> NDArray | list[NDArray]:
+    def get_array(self, z_projection: Zproj = None) -> NDArray | list[NDArray]:
         arr = nd2.imread(self.img_path)
+        p_axis = self.axis_index('P')[0]
+        z_axis = self.axis_index('Z')[0]
         
-        if self.serie_axis_index is None:
-            return arr
+        if p_axis is None:
+            return apply_z_projection(arr, z_axis=z_axis, method=z_projection)
 
-        series_lst = np.split(arr, arr.shape[self.serie_axis_index], axis=self.serie_axis_index)
-        return [s.squeeze(axis=self.serie_axis_index) for s in series_lst]
+        series_lst = np.split(arr, arr.shape[p_axis], axis=p_axis)
+        arr_lst = [s.squeeze(axis=p_axis) for s in series_lst]
+        return [apply_z_projection(a, z_axis=z_axis, method=z_projection) for a in arr_lst]
     
-    def get_channel(self, channel: int | str | Sequence[int | str]) -> NDArray:
-        logger.info("Reading channel(s) from .nd2 file is not yet implemented")
-        raise NotImplementedError("Channel reading from .nd2 files is not yet implemented")
+    def get_channel(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> NDArray | list[NDArray]:
+        logger.warning("Reading channel(s) from .nd2 file is not yet implemented")
+        return np.array([])
     
 @dataclass
 class TiffReader(ImageReader):
     
-    _tifserie0: TiffPageSeries = field(init=False)
-    _axes: str = field(init=False)
-    _page0: TiffPage = field(init=False)
+    _shape: list[tuple[int, ...]] = field(init=False)
+    _axes: list[str] = field(init=False)
+    # Series are handled as separate files internally, like a list of images, so no real axis
+    _series_count: int = field(init=False)
+    _compression_method: list[str | None] = field(init=False)
+    _resolution: list[PixelSize | None] = field(init=False, default_factory=list)
     _imageJ_meta: dict[str, Any] = field(init=False)
     _status: StatusFlag = field(init=False)
     _custom_metadata: Mapping[str, Any] | None = field(init=False)
@@ -224,39 +250,73 @@ class TiffReader(ImageReader):
 
     def __post_init__(self) -> None:
         with TiffFile(self.img_path) as tif:
-            self._tifserie0 = tif.series[0]
-            self._axes = self._tifserie0.axes
-            self._page0 = cast(TiffPage, tif.pages[0]) # for typing purposes
+            self._series_count = len(tif.series)
+            
+            self._shape = [s.shape for s in tif.series]
+            self._axes = [s.axes for s in tif.series] # Only possible axes: C, Z, T, Y, X
+            
+            
+            self._resolution = [self._get_resolution_from_tags(cast(TiffPage, s.pages[0]))
+                    for s in tif.series]
+            
             self._imageJ_meta = tif.imagej_metadata or {}
             
-            meta = self._page0.tags.get(FITS_TAG)
-            if meta is None:
-                self._custom_metadata = None
-            else:
-                v = meta.value
-                if isinstance(v, (bytes, bytearray)):
-                    v = v.decode("utf-8", "replace")
-                try:
-                    self._custom_metadata = json.loads(v)
-                except Exception:
-                    logger.warning("FITS_TAG present but not valid JSON")
-                    self._custom_metadata = None
+            self._compression_method = [self._get_compression_from_tags(cast(TiffPage, s.pages[0])) 
+                    for s in tif.series]
+            
+            meta = cast(TiffPage, tif.series[0].pages[0]).tags.get(FITS_TAG)
+            self._custom_metadata = self._get_custom_metadata_from_tags(meta)
             
         self._status = self._get_status_from_metadata()
     
+    def _get_compression_from_tags(self, tiff_page: TiffPage) -> str | None:
+        comp = COMPRESSION(tiff_page.tags["Compression"].value)
+        return comp.name if comp != COMPRESSION.NONE else None
+    
+    def _get_resolution_from_tags(self, tiff_page: TiffPage) -> PixelSize | None:
+        xres = tiff_page.tags.get('XResolution')
+        yres = tiff_page.tags.get('YResolution')
+        
+        if xres is None or yres is None:
+            return None
+        
+        xres = xres.value[0]/xres.value[1]
+        x_um_per_pix = round(1./float(xres), 4)
+        yres = yres.value[0]/yres.value[1]
+        y_um_per_pix = round(1./float(yres), 4)
+        return (x_um_per_pix, y_um_per_pix)
+    
+    def _get_custom_metadata_from_tags(self, meta_tag: TiffTag | None) -> Mapping[str, Any] | None:
+        if meta_tag is None:
+            return None
+        
+        v = meta_tag.value
+        if isinstance(v, (bytes, bytearray)):
+            v = v.decode("utf-8", "replace")
+        try:
+            return json.loads(v)
+        except Exception:
+            logger.warning("FITS_TAG present but not valid JSON")
+            return None
+    
     def _get_status_from_metadata(self) -> StatusFlag:
         info = self._imageJ_meta.get("Info")
-        prefix = "fits_io.status: "
+        prefix = DEFAULT_FLAG_PREFIX
 
-        if not info or not info.startswith(prefix) or not isinstance(info, str):
+        if not isinstance(info, str) or not info.startswith(prefix):
             return DEFAULT_FLAG
 
         flag = info[len(prefix):].strip()
         return flag if flag in ALLOWED_FLAGS else DEFAULT_FLAG
-     
+    
     @property
-    def axes(self) -> str:
-        return self._axes.replace('S', '')  # Remove 'S' axis for series handling.
+    def axes(self) -> list[str]:
+        return self._axes
+    
+    @property
+    def compression_method(self) -> str | None:
+        # Not expecting multi-series with different compression when using this property
+        return self._compression_method[0] 
     
     @property
     def status(self) -> StatusFlag:
@@ -264,16 +324,18 @@ class TiffReader(ImageReader):
     
     @property
     def export_status(self,) -> str:
-        return f"fits_io.status: {self._status}\n"
+        return StatusProfile(status=self._status).export
     
     @property
-    def channel_number(self) -> int:
-        shape = self._tifserie0.shape
-        if 'C' in self._axes:
-            c_index = self._axes.index('C')
-            return shape[c_index]
-        else:
-            return 1
+    def channel_number(self) -> list[int]:
+        out: list[int] = []
+        for i, shape in enumerate(self._shape):
+            if 'C' in self._axes[i]:
+                c_idx = self._axes[i].index('C')
+                out.append(shape[c_idx])
+            else:
+                out.append(1)
+        return out
     
     @property
     def channel_labels(self) -> list[str] | None:
@@ -284,31 +346,20 @@ class TiffReader(ImageReader):
     
     @property
     def series_number(self) -> int:
-        if 'S' in self._axes:
-            s_index = self._axes.index('S')
-            return self._tifserie0.shape[s_index]
-        else:
-            return 1
+        return self._series_count
+    
+    def axis_index(self, axis: Literal['P', 'C', 'Z', 'T', 'X', 'Y']) -> list[int | None]:
+        out: list[int | None] = []
+        for ax in self._axes:
+            if axis not in ax:
+                out.append(None)
+            else:
+                out.append(ax.index(axis))
+        return out
     
     @property
-    def serie_axis_index(self) -> int | None:
-        if 'S' not in self._axes:
-            return None
-        return self._axes.index('S')
-    
-    @property
-    def resolution(self) -> PixelSize | None:
-        x_res = self._page0.tags.get('XResolution')
-        y_res = self._page0.tags.get('YResolution')
-        
-        if x_res is None or y_res is None:
-            return None
-        
-        xres = x_res.value[0]/x_res.value[1]
-        x_um_per_pix = round(1./float(xres), 4)
-        yres = y_res.value[0]/y_res.value[1]
-        y_um_per_pix = round(1./float(yres), 4)
-        return (x_um_per_pix, y_um_per_pix)
+    def resolution(self) -> list[PixelSize | None]:
+        return self._resolution
                 
     @property
     def interval(self) -> float | None:
@@ -320,21 +371,42 @@ class TiffReader(ImageReader):
             return {}
         return self._custom_metadata
     
-    def get_array(self) -> NDArray | list[NDArray]:
-        arr = imread(self.img_path)
-        if self.serie_axis_index is None:
-            return arr
-        series_lst = np.split(arr, arr.shape[self.serie_axis_index], axis=self.serie_axis_index)
-        return [s.squeeze(axis=self.serie_axis_index) for s in series_lst]
+    def get_array(self, z_projection: Zproj = None) -> NDArray | list[NDArray]:
+        if self.series_number == 1:
+            z_axis = self.axis_index('Z')[0]
+            arr = imread(self.img_path)
+            return apply_z_projection(arr, z_axis=z_axis, method=z_projection)
+        
+        with TiffFile(self.img_path) as tif:
+            out: list[NDArray] = []
+            for i, s in enumerate(tif.series):
+                arr = s.asarray()
+                z_axis = self.axis_index('Z')[i]
+                z_arr = apply_z_projection(arr, z_axis=z_axis, method=z_projection)
+                out.append(z_arr)
+        return out
 
-    def get_channel(self, channel: int | str | Sequence[int | str]) -> NDArray:
-        if "S" in self._axes:
-            raise NotImplementedError("Channel reading from multi-series TIFF files is not yet implemented")
-        return read_tiff_channels(
-            self.img_path,
-            channel,
-            channel_labels=self.channel_labels,
-        )
+    def get_channel(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> NDArray | list[NDArray]:
+        if self.series_number == 1:
+            z_axis = self.axis_index('Z')[0]
+            chan_arr = read_tiff_channels(
+                self.img_path,
+                channel,
+                channel_labels=self.channel_labels,
+                series_index=0,)
+            return apply_z_projection(chan_arr, z_axis=z_axis, method=z_projection)
+        
+        chan_arr_lst = [read_tiff_channels(
+                self.img_path,
+                channel,
+                channel_labels=self.channel_labels,
+                series_index=i,
+            ) for i in range(self.series_number)]
+        
+        for i, arr in enumerate(chan_arr_lst):
+            z_axis = self.axis_index('Z')[i]
+            chan_arr_lst[i] = apply_z_projection(arr, z_axis=z_axis, method=z_projection)
+        return chan_arr_lst
     
 class ImageReaderError(Exception):
     """Base exception for reader-related errors."""
@@ -377,39 +449,19 @@ def get_reader(path: str | Path) -> ImageReader:
 
 if __name__ == "__main__":
     
-    tif_path = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run2/test.tif')
+    tif_path1 = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run2/c2z25t23v1_tif.tif')
+    stack1 = imread(tif_path1)
+    print(stack1.shape)
+    tif_path2 = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run4/c4z1t91v1.tif')
+    stack2 = imread(tif_path2)
+    print(stack2.shape)
     
+    with TiffWriter('/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run2/test.tif') as tif:
+        tif.write(stack1, metadata={'axes':'TZCYX'}, compression=None)
+        tif.write(stack2, metadata={'axes':'TCYX'}, compression='lzw', photometric="minisblack", planarconfig="separate")
     
-    rtif = get_reader(tif_path)
-    # print(rtif.channel_number)
-    # print(rtif.serie_axis_index)
-    print(rtif.resolution)
-    # print(rtif.interval)
-    # print(rtif.axes)
-    # arrs = rtif.get_array()
-    # if isinstance(arrs, list):
-    #     print(len(arrs))
-    #     print(arrs[0].shape)
-    # else:
-    #     print(arrs.shape)
-        
-    
-    
-    # nd2_path = Path('/home/ben/Docker_mount/Test_images/nd2/Run2/c2z25t23v1_nd2.nd2')
-    # save_path = Path('/home/ben/Docker_mount/Test_images/nd2/Run2/test.tiff')
-    
-    
-    # with nd2.ND2File(nd2_path) as file:
-    #     meta = file.metadata
-    #     chans = getattr(meta, 'channels', None)
-    #     if chans is not None:
-    #         for ch in chans:
-    #             print(ch.channel.name)
-        # rnd2 = get_reader(nd2_path)
-    # # # rnd2 = Nd2Reader(nd2_path)
-    # print(rnd2.resolution)
-    # print(rnd2.interval)
-    # print(rnd2.axes)
-    # print(rnd2.serie_axis_index)
-    # print(len(rnd2.get_array()))
+    with TiffFile("/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run2/test.tif") as tif:
+        print("n_series:", len(tif.series))
+        for i, s in enumerate(tif.series):
+            print(i, "axes:", s.axes, "shape:", s.shape, "n_pages:", len(s.pages))
     

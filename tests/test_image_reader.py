@@ -64,10 +64,10 @@ def test_tiff_axes_channel_series_resolution_interval(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(m, "TiffFile", _FakeTiffFile_full)
 
     r = m.TiffReader(p)
-    assert r.axes == "CYX"
-    assert r.channel_number == 3
-    # assert r.serie_axis_index == 0  # "S" first in "SCYX"
-    assert r.resolution == (0.5, 0.25)  # from fake tags
+    assert r.axes == ["CYX", "CYX"]  # S=2 series, both have CYX axes
+    assert r.channel_number == [3, 3]  # 3 channels in each series
+    assert r.series_number == 2
+    assert r.resolution == [(0.5, 0.25), (0.5, 0.25)]  # from fake tags, same for both series
     assert r.interval == 11.0  # finterval from fake imagej_metadata
 
 
@@ -103,7 +103,8 @@ def test_tiff_status_reads_valid_flag(monkeypatch, tmp_path: Path):
 
     def _FakeTiffFile_status_skip(path):
         ij = {"Info": "fits_io.status: skip\n"}
-        return _FakeTiff(axes="YX", shape=(5, 6), tags=[], imagej_metadata=ij)
+        tags = [_FakeTag("Compression", 1)]  # COMPRESSION.NONE = 1
+        return _FakeTiff(axes="YX", shape=(5, 6), tags=tags, imagej_metadata=ij)
 
     monkeypatch.setattr(m, "TiffFile", _FakeTiffFile_status_skip)
 
@@ -125,7 +126,8 @@ def test_tiff_status_defaults_when_missing_or_wrong_prefix(monkeypatch, tmp_path
     p.write_bytes(b"fake")
 
     def _FakeTiffFile_with_ij(path):
-        return _FakeTiff(axes="YX", shape=(5, 6), tags=[], imagej_metadata=imagej_metadata)
+        tags = [_FakeTag("Compression", 1)]  # COMPRESSION.NONE = 1
+        return _FakeTiff(axes="YX", shape=(5, 6), tags=tags, imagej_metadata=imagej_metadata)
 
     monkeypatch.setattr(m, "TiffFile", _FakeTiffFile_with_ij)
 
@@ -139,7 +141,8 @@ def test_tiff_status_defaults_when_invalid_flag(monkeypatch, tmp_path: Path):
 
     def _FakeTiffFile_status_invalid(path):
         ij = {"Info": "fits_io.status: banana\n"}
-        return _FakeTiff(axes="YX", shape=(5, 6), tags=[], imagej_metadata=ij)
+        tags = [_FakeTag("Compression", 1)]  # COMPRESSION.NONE = 1
+        return _FakeTiff(axes="YX", shape=(5, 6), tags=tags, imagej_metadata=ij)
 
     monkeypatch.setattr(m, "TiffFile", _FakeTiffFile_status_invalid)
 
@@ -163,9 +166,9 @@ def test_nd2_axes_channel_series(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(m.nd2, "ND2File", _FakeND2File_basic)
 
     r = m.Nd2Reader(p)
-    assert r.axes == "TZCYX"  # from fake sizes keys
-    assert r.channel_number == 2
-    assert r.serie_axis_index == r._axes.index("P")
+    assert r.axes == ["TZCYX"]  # from fake sizes keys
+    assert r.channel_number == [2]  # single value in list
+    assert r.series_number == 2  # P axis creates series
 
 
 # Meta factory functions for parametrize
@@ -209,7 +212,7 @@ def test_nd2_resolution_defensive(monkeypatch, tmp_path: Path, meta_factory, exp
     monkeypatch.setattr(m.nd2, "ND2File", _FakeND2File_meta(meta_factory))
 
     r = m.Nd2Reader(p)
-    assert r.resolution == expected
+    assert r.resolution == [expected]  # now returns a list
 
 
 def test_nd2_interval_none_when_no_time(monkeypatch, tmp_path: Path):
@@ -279,6 +282,13 @@ class _FakeTiffTags:
         # Allows: for tag in page.tags: ...
         return iter(self._tags)
 
+    def __getitem__(self, key):
+        """Support tags[key] notation."""
+        result = self.get(key)
+        if result is None:
+            raise KeyError(key)
+        return result
+
     def get(self, key, default=None):
         """
         Support lookup by:
@@ -306,15 +316,26 @@ class _FakePage:
 
 
 class _FakeSeries:
-    def __init__(self, axes, shape):
+    def __init__(self, axes, shape, pages=None):
         self.axes = axes
         self.shape = shape
+        self.pages = pages or []
+    
+    def asarray(self):
+        """Return a fake array matching this series' shape."""
+        return np.zeros(self.shape, dtype=np.uint8)
 
 
 class _FakeTiff:
-    def __init__(self, axes="YX", shape=(5, 6), tags=None, imagej_metadata=None):
-        self.series = [_FakeSeries(axes, shape)]
-        self.pages = [_FakePage(tags or [])]
+    def __init__(self, axes="YX", shape=(5, 6), tags=None, imagej_metadata=None, series=None):
+        page = _FakePage(tags or [])
+        if series is None:
+            # Default: single series
+            self.series = [_FakeSeries(axes, shape, pages=[page])]
+        else:
+            # Custom multi-series (for testing series axis like S)
+            self.series = series
+        self.pages = [page]
         self.imagej_metadata = imagej_metadata
 
     def __enter__(self):
@@ -325,27 +346,43 @@ class _FakeTiff:
 
 
 def _FakeTiffFile_full(path):
-    # axes "SCYX": S=2, C=3, Y=5, X=6
+    # axes "SCYX": S=2, C=3, Y=5, X=6 - simulate 2 series (S is series axis)
     tags = [
+        _FakeTag("Compression", 1),  # COMPRESSION.NONE = 1
         _FakeTag("XResolution", (2, 1)),  # xres=2 -> um/px=0.5
         _FakeTag("YResolution", (4, 1)),  # yres=4 -> um/px=0.25
     ]
     ij = {"finterval": 11.0}
-    return _FakeTiff(axes="SCYX", shape=(2, 3, 5, 6), tags=tags, imagej_metadata=ij)
+    page = _FakePage(tags)
+    # Create 2 series, each with CYX axes and shape (3, 5, 6)
+    series = [
+        _FakeSeries("CYX", (3, 5, 6), pages=[page]),
+        _FakeSeries("CYX", (3, 5, 6), pages=[page]),
+    ]
+    return _FakeTiff(series=series, tags=tags, imagej_metadata=ij)
 
 
 def _FakeTiffFile_no_series(path):
     # minimal safe for __post_init__
-    return _FakeTiff(axes="YX", shape=(5, 6), tags=[], imagej_metadata={})
+    tags = [_FakeTag("Compression", 1)]  # COMPRESSION.NONE = 1
+    return _FakeTiff(axes="YX", shape=(5, 6), tags=tags, imagej_metadata={})
 
 
 def _FakeTiffFile_no_series_axes(path):
-    return _FakeTiff(axes="ZYX", shape=(2, 5, 6), tags=[], imagej_metadata={})
+    tags = [_FakeTag("Compression", 1)]  # COMPRESSION.NONE = 1
+    return _FakeTiff(axes="ZYX", shape=(2, 5, 6), tags=tags, imagej_metadata={})
 
 
 def _FakeTiffFile_series_S0(path):
-    # series axis "S" first
-    return _FakeTiff(axes="SYX", shape=(2, 5, 6), tags=[], imagej_metadata={})
+    # series axis "S" first - simulate 2 series (S=2)
+    tags = [_FakeTag("Compression", 1)]  # COMPRESSION.NONE = 1
+    page = _FakePage(tags)
+    # Create 2 series, each with YX axes and shape (5, 6)
+    series = [
+        _FakeSeries("YX", (5, 6), pages=[page]),
+        _FakeSeries("YX", (5, 6), pages=[page]),
+    ]
+    return _FakeTiff(series=series, tags=tags, imagej_metadata={})
 
 
 # ---- ND2 fakes ----

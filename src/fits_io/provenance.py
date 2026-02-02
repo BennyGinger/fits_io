@@ -45,7 +45,7 @@ def get_dist_version(dist_name: str) -> str:
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-def add_provenance_profile(custom_metadata: Mapping[str, Any], *, export_profile: ExportProfile) -> dict[str, Any]:
+def add_provenance_profile(custom_metadata: Mapping[str, Any], *, export_profile: ExportProfile | None = None) -> dict[str, Any]:
     """
     Small helper to add a provenance profile to custom metadata while saving the TIFF.
     Args:
@@ -58,11 +58,12 @@ def add_provenance_profile(custom_metadata: Mapping[str, Any], *, export_profile
     
     out = dict(custom_metadata)
     
-    out[export_profile.step_name] = {
-        "dist": export_profile.dist_name,
-        "version": get_dist_version(export_profile.dist_name),
-        "timestamp": utc_now_iso(),
-    }
+    if export_profile is not None:
+        out[export_profile.step_name] = {
+            "dist": export_profile.dist_name,
+            "version": get_dist_version(export_profile.dist_name),
+            "timestamp": utc_now_iso(),
+        }
     return out
 
 

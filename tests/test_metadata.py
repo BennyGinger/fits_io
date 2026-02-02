@@ -12,13 +12,14 @@ from fits_io.provenance import ExportProfile
 class DummyReader:
     """Minimal ImageReader-like object for build_imagej_metadata tests."""
     def __init__(self, axes="TZCYX", interval=11.0, channel_number=2, resolution=(0.5, 0.25), custom_metadata=None):
-        self.axes = axes
+        self.axes = [axes]  # wrap in list to match new API
         self.interval = interval
-        self.channel_number = channel_number
-        self.resolution = resolution
+        self.channel_number = [channel_number]  # wrap in list to match new API
+        self.resolution = [resolution]  # wrap in list to match new API
         self.channel_labels = None
         self.custom_metadata = custom_metadata or {}
-        self.export_status = "active"
+        self.export_status = "fits_io.status: active\n"
+        self.status = "active"
 
 
 # -------------------------
@@ -28,13 +29,13 @@ class DummyReader:
 def test_stackmeta_to_dict_with_interval():
     s = md.StackMeta(axes="TZCYX", status='active', finterval=11.0)
     d = s.to_dict()
-    assert d == {"axes": "TZCYX", 'Info': 'active', "finterval": 11.0}
+    assert d == {"axes": "TZCYX", 'Info': 'fits_io.status: active\n', "finterval": 11.0}
 
 
 def test_stackmeta_to_dict_without_interval():
     s = md.StackMeta(axes="YX", status='active', finterval=None)
     d = s.to_dict()
-    assert d == {"axes": "YX", 'Info': 'active'}
+    assert d == {"axes": "YX", 'Info': 'fits_io.status: active\n'}
     assert "finterval" not in d
 
 
@@ -127,7 +128,7 @@ def test_channelmeta_to_dict_includes_luts_only_when_present():
 def test_build_imagej_metadata_basic_includes_expected_fields():
     reader = DummyReader(axes="TZCYX", interval=11.0, channel_number=2, resolution=(0.5, 0.25))
     export_profile = ExportProfile(dist_name="test-dist", step_name="test_step", filename="test.tif")
-    out = md.build_imagej_metadata(cast(md.ImageReader, reader), export_profile, channel_labels=["GFP", "mCherry"])
+    out = md.build_imagej_metadata(cast(md.ImageReader, reader), export_profile=export_profile, channel_labels=["GFP", "mCherry"])
 
     assert isinstance(out, md.TiffMetadata)
     assert out.imagej_meta["axes"] == "TZCYX"
@@ -141,14 +142,14 @@ def test_build_imagej_metadata_basic_includes_expected_fields():
 def test_build_imagej_metadata_channel_labels_str_becomes_list():
     reader = DummyReader(channel_number=1)
     export_profile = ExportProfile(dist_name="test-dist", step_name="test_step", filename="test.tif")
-    out = md.build_imagej_metadata(cast(md.ImageReader, reader), export_profile, channel_labels="GFP")
+    out = md.build_imagej_metadata(cast(md.ImageReader, reader), export_profile=export_profile, channel_labels="GFP")
     assert out.imagej_meta["Labels"] == ["GFP"]
 
 
 def test_build_imagej_metadata_no_resolution_means_no_unit_and_no_resolution_payload():
     reader = DummyReader(resolution=(1.0, 1.0))
     export_profile = ExportProfile(dist_name="test-dist", step_name="test_step", filename="test.tif")
-    out = md.build_imagej_metadata(cast(md.ImageReader, reader), export_profile, channel_labels=None)
+    out = md.build_imagej_metadata(cast(md.ImageReader, reader), export_profile=export_profile, channel_labels=None)
 
     assert out.resolution == (1.0, 1.0)
     assert out.imagej_meta["unit"] == "micron"
@@ -180,7 +181,7 @@ def test_build_imagej_metadata_custom_metadata_only_creates_extratags():
     export_profile = ExportProfile(dist_name="test-dist", step_name="test_step", filename="test.tif")
     out = md.build_imagej_metadata(
         cast(md.ImageReader, reader),
-        export_profile,
+        export_profile=export_profile,
     )
 
     assert out.extratags is not None
@@ -213,7 +214,7 @@ def test_build_imagej_metadata_custom_metadata_only_creates_extratags():
 def test_build_imagej_metadata_resolution_payload_is_pixel_size_um_per_px():
     reader = DummyReader(resolution=(0.5, 0.25))
     export_profile = ExportProfile(dist_name="test-dist", step_name="test_step", filename="test.tif")
-    out = md.build_imagej_metadata(cast(md.ImageReader, reader), export_profile, extra_step_metadata={"resolution": (0.5, 0.25)})
+    out = md.build_imagej_metadata(cast(md.ImageReader, reader), export_profile=export_profile, extra_step_metadata={"resolution": (0.5, 0.25)})
     assert out.extratags is not None
 
     raw = out.extratags[0][3]

@@ -14,3 +14,4 @@ ExtraTags: TypeAlias = Sequence[TiffTag]
 
 PixelSize: TypeAlias = tuple[float, float]  # (x_um_per_pix, y_um_per_pix)
 PixelDensity: TypeAlias = tuple[float, float]  # (x_pix_per_unit, y_pix_per_unit)
+

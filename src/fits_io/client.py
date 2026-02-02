@@ -4,8 +4,8 @@ from typing import Any, Mapping, Sequence
 
 from numpy.typing import NDArray
 
-from fits_io.image_reader import ImageReader, get_reader
-from fits_io.writer import get_save_dirs, convert_to_fits_tif, save_fits_array
+from fits_io.image_reader import ImageReader, StatusFlag, get_reader, Zproj
+from fits_io.writer import get_save_dirs, convert_to_fits_tif, save_fits_array, set_status
 from fits_io.provenance import create_export_profile
 
 
@@ -29,17 +29,42 @@ class FitsIO:
         """
         return self.reader.custom_metadata
     
-    def get_array(self) -> NDArray | list[NDArray]:
+    @property
+    def status(self) -> StatusFlag:
+        """
+        Returns the status of the image.
+        """
+        return self.reader.status
+    
+    def set_status(self, status: StatusFlag) -> None:
+        """
+        Set the status of the image to either 'active' or 'skip'.
+        
+        Policy:
+        - This function will only change the status in the metadata, so it will load whatever array is already stored in the file and re-save it with updated metadata. So, no z-projection, channel selection or compression is applied here.
+        - Multi-series inputs are not supported here by design.
+        
+        Args:
+            status : New status to set ('active' or 'skip').
+        """
+        set_status(self.reader, status)
+    
+    def get_array(self, z_projection: Zproj = None) -> NDArray | list[NDArray]:
         """
         Returns the image data as a NumPy array or a list of arrays for multi-series files.
+        Args:
+            z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
         """
-        return self.reader.get_array()
+        return self.reader.get_array(z_projection=z_projection)
     
-    def get_channel_array(self, channel: int | str | Sequence[int | str]) -> NDArray:
+    def get_channel_array(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> NDArray | list[NDArray]:
         """
-        Returns the image data for a specific channel(s) as a NumPy array
+        Returns the image data for a specific channel(s) as a NumPy array or a list of arrays for multi-series files.
+        Args:
+            channel : Channel selector(s): int indices and/or str labels (all must be same type).
+            z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
         """
-        return self.reader.get_channel(channel)
+        return self.reader.get_channel(channel, z_projection=z_projection)
     
     def get_save_dirs(self) -> Path | list[Path]:
         """

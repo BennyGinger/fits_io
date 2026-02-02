@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from tifffile import TiffFile
 
 
-def read_tiff_channels(path: str | Path, channel: int | str | Sequence[int | str], *, channel_labels: Sequence[str] | None = None) -> NDArray:
+def read_tiff_channels(path: str | Path, channel: int | str | Sequence[int | str], *, channel_labels: Sequence[str] | None = None, series_index: int = 0,) -> NDArray:
     """
     Read one or more channels from a TIFF hyperstack stored as pages (e.g. TZCYX).
 
@@ -24,6 +25,8 @@ def read_tiff_channels(path: str | Path, channel: int | str | Sequence[int | str
         Channel selector(s): int indices and/or str labels (all must be same type).
     channel_labels:
         Required if channel is/contains str. Used to map label -> index.
+    series_index:
+        Series index to read from multi-series TIFF files.
 
     Returns
     -------
@@ -56,7 +59,10 @@ def read_tiff_channels(path: str | Path, channel: int | str | Sequence[int | str
     c_list = [c for c in c_list if not (c in seen or seen.add(c))]
 
     with TiffFile(path) as tif:
-        s = tif.series[0]
+        if not (0 <= series_index < len(tif.series)):
+            raise IndexError(f"series_index {series_index} out of range (0..{len(tif.series)-1})")
+        
+        s = tif.series[series_index]
         axes = s.axes
         shape = s.shape
 
@@ -101,3 +107,26 @@ def read_tiff_channels(path: str | Path, channel: int | str | Sequence[int | str
             out = np.squeeze(out, axis=page_axes.index("C"))
 
         return out
+    
+    
+def apply_z_projection(arr: NDArray, z_axis: int | None, method: Literal['max', 'mean', None]) -> NDArray:
+    """
+    Return array after applying z-projection along specified axis, if any and method given. Else return original array.
+    Args:
+        arr: Input array.
+        z_axis: Axis index corresponding to Z dimension.
+        method: Projection method: 'max', 'mean', or None.
+    
+    Returns:
+        NDArray: Projected array or original array.
+    """
+    
+    if z_axis is None or method is None:
+        return arr
+    
+    if method == 'max':
+        return np.max(arr, axis=z_axis)
+    elif method == 'mean':
+        return np.mean(arr, axis=z_axis)
+    else:
+        raise ValueError(f"Unsupported z-projection method: {method}")
