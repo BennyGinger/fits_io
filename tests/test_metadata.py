@@ -6,7 +6,6 @@ import pytest
 
 # adjust import if your package path is different
 import fits_io.metadata as md
-from fits_io.provenance import ExportProfile
 
 
 class DummyReader:
@@ -27,15 +26,15 @@ class DummyReader:
 # -------------------------
 
 def test_stackmeta_to_dict_with_interval():
-    s = md.StackMeta(axes="TZCYX", status='active', finterval=11.0)
+    s = md.StackMeta(axes="TZCYX", status='active', user_name='unknown', finterval=11.0)
     d = s.to_dict()
-    assert d == {"axes": "TZCYX", 'Info': 'fits_io.status: active\n', "finterval": 11.0}
+    assert d == {"axes": "TZCYX", 'Info': 'fits_io.status: active\nfits_io.user: unknown\n', "finterval": 11.0}
 
 
 def test_stackmeta_to_dict_without_interval():
-    s = md.StackMeta(axes="YX", status='active', finterval=None)
+    s = md.StackMeta(axes="YX", status='active', user_name='unknown', finterval=None)
     d = s.to_dict()
-    assert d == {"axes": "YX", 'Info': 'fits_io.status: active\n'}
+    assert d == {"axes": "YX", 'Info': 'fits_io.status: active\nfits_io.user: unknown\n'}
     assert "finterval" not in d
 
 
@@ -127,8 +126,7 @@ def test_channelmeta_to_dict_includes_luts_only_when_present():
 
 def test_build_imagej_metadata_basic_includes_expected_fields():
     reader = DummyReader(axes="TZCYX", interval=11.0, channel_number=2, resolution=(0.5, 0.25))
-    export_profile = ExportProfile(dist_name="test-dist", step_name="test_step", filename="test.tif")
-    out = md.build_imagej_metadata(cast(md.ImageReader, reader), export_profile=export_profile, channel_labels=["GFP", "mCherry"])
+    out = md.build_imagej_metadata(cast(md.ImageReader, reader), user_name="test_user", distribution="test-dist", step_name="test_step", channel_labels=["GFP", "mCherry"])
 
     assert isinstance(out, md.TiffMetadata)
     assert out.imagej_meta["axes"] == "TZCYX"
@@ -141,15 +139,13 @@ def test_build_imagej_metadata_basic_includes_expected_fields():
 
 def test_build_imagej_metadata_channel_labels_str_becomes_list():
     reader = DummyReader(channel_number=1)
-    export_profile = ExportProfile(dist_name="test-dist", step_name="test_step", filename="test.tif")
-    out = md.build_imagej_metadata(cast(md.ImageReader, reader), export_profile=export_profile, channel_labels="GFP")
+    out = md.build_imagej_metadata(cast(md.ImageReader, reader), user_name="test_user", distribution="test-dist", step_name="test_step", channel_labels="GFP")
     assert out.imagej_meta["Labels"] == ["GFP"]
 
 
 def test_build_imagej_metadata_no_resolution_means_no_unit_and_no_resolution_payload():
     reader = DummyReader(resolution=(1.0, 1.0))
-    export_profile = ExportProfile(dist_name="test-dist", step_name="test_step", filename="test.tif")
-    out = md.build_imagej_metadata(cast(md.ImageReader, reader), export_profile=export_profile, channel_labels=None)
+    out = md.build_imagej_metadata(cast(md.ImageReader, reader), user_name="test_user", distribution="test-dist", step_name="test_step", channel_labels=None)
 
     assert out.resolution == (1.0, 1.0)
     assert out.imagej_meta["unit"] == "micron"
@@ -164,8 +160,8 @@ def test_build_imagej_metadata_no_resolution_means_no_unit_and_no_resolution_pay
     assert writeonce is True
 
     payload = json.loads(value.decode("utf-8"))
-    assert export_profile.step_name in payload
-    step_meta = payload[export_profile.step_name]
+    assert "test_step" in payload
+    step_meta = payload["test_step"]
 
     # basic provenance keys exist
     assert "dist" in step_meta
@@ -178,10 +174,11 @@ def test_build_imagej_metadata_no_resolution_means_no_unit_and_no_resolution_pay
 
 def test_build_imagej_metadata_custom_metadata_only_creates_extratags():
     reader = DummyReader(resolution=(1.0, 1.0), custom_metadata={"a": 1, "b": {"c": 2}})
-    export_profile = ExportProfile(dist_name="test-dist", step_name="test_step", filename="test.tif")
     out = md.build_imagej_metadata(
         cast(md.ImageReader, reader),
-        export_profile=export_profile,
+        user_name="test_user",
+        distribution="test-dist",
+        step_name="test_step",
     )
 
     assert out.extratags is not None
@@ -200,8 +197,8 @@ def test_build_imagej_metadata_custom_metadata_only_creates_extratags():
     assert payload["b"] == {"c": 2}
 
     # provenance step is also present
-    assert export_profile.step_name in payload
-    step_meta = payload[export_profile.step_name]
+    assert "test_step" in payload
+    step_meta = payload["test_step"]
     assert "dist" in step_meta
     assert "version" in step_meta
     assert "timestamp" in step_meta
@@ -213,14 +210,38 @@ def test_build_imagej_metadata_custom_metadata_only_creates_extratags():
 
 def test_build_imagej_metadata_resolution_payload_is_pixel_size_um_per_px():
     reader = DummyReader(resolution=(0.5, 0.25))
-    export_profile = ExportProfile(dist_name="test-dist", step_name="test_step", filename="test.tif")
-    out = md.build_imagej_metadata(cast(md.ImageReader, reader), export_profile=export_profile, extra_step_metadata={"resolution": (0.5, 0.25)})
+    out = md.build_imagej_metadata(cast(md.ImageReader, reader), user_name="test_user", distribution="test-dist", step_name="test_step", extra_step_metadata={"resolution": (0.5, 0.25)})
     assert out.extratags is not None
 
     raw = out.extratags[0][3]
     payload = json.loads(raw.decode("utf-8"))
 
     # resolution is stored under the step, as pixel size (um/px)
-    step_meta = payload[export_profile.step_name]
+    step_meta = payload["test_step"]
     assert step_meta["resolution"] == [0.5, 0.25] or step_meta["resolution"] == (0.5, 0.25)
 
+
+def test_build_imagej_metadata_with_new_status_does_not_create_provenance():
+    """When new_status is provided, only status should change, no provenance added."""
+    reader = DummyReader(resolution=(1.0, 1.0), custom_metadata={"existing": "data"})
+    out = md.build_imagej_metadata(
+        cast(md.ImageReader, reader),
+        user_name="test_user",
+        distribution="test-dist",
+        step_name="test_step",
+        new_status="skip",
+    )
+
+    # Status should be changed in ImageJ metadata
+    assert "skip" in out.imagej_meta["Info"]
+    
+    # Extratags should preserve existing metadata but NOT add new provenance
+    assert out.extratags is not None
+    raw = out.extratags[0][3]
+    payload = json.loads(raw.decode("utf-8"))
+    
+    # Existing metadata should be preserved
+    assert payload["existing"] == "data"
+    
+    # New provenance step should NOT be added
+    assert "test_step" not in payload

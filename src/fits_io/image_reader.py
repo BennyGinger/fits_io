@@ -15,24 +15,38 @@ import numpy as np
 from fits_io.provenance import FITS_TAG
 from fits_io._types import PixelSize
 
-
+ExtTags = Literal['.tiff', '.tif', '.nd2']
+SUPPORTED_EXTENSIONS: set[ExtTags] = {'.tiff', '.tif', '.nd2'}
 StatusFlag = Literal["active", "skip"]
 ALLOWED_FLAGS: set[StatusFlag] = {"active", "skip"}
 DEFAULT_FLAG: StatusFlag = "active"
-DEFAULT_FLAG_PREFIX = "fits_io.status: "
+INFO_NAMESPACE = "fits_io"
 Zproj = Literal['max', 'mean', None]
 
 logger = logging.getLogger(__name__)
 
 @dataclass
-class StatusProfile:
-    """Class to represent status profile information to be exported."""
+class InfoProfile:
+    """Class to build the string for ImageJ Info metadata"""
     status: StatusFlag
-    prefix: str = DEFAULT_FLAG_PREFIX
+    user: str = "unknown"
+    namespace: str = INFO_NAMESPACE
     
     @property
+    def _status(self) -> str:
+        return f"{self.namespace}.status: {self.status}"
+    
+    @property
+    def _user(self) -> str:
+        return f"{self.namespace}.user: {self.user}"
+
+    @property
     def export(self) -> str:
-        return f"{self.prefix}{self.status}\n"
+        lines = [
+            self._status,
+            self._user,
+            ]
+        return "\n".join(lines) + "\n"
 
 @dataclass
 class ImageReader(ABC):
@@ -155,7 +169,7 @@ class Nd2Reader(ImageReader):
     
     @property
     def export_status(self,) -> str:
-        return StatusProfile(status=DEFAULT_FLAG).export
+        return InfoProfile(status=DEFAULT_FLAG).export
     
     @property
     def channel_number(self) -> list[int]:
@@ -178,8 +192,8 @@ class Nd2Reader(ImageReader):
     
     def axis_index(self, axis: Literal['P', 'C', 'Z', 'T', 'X', 'Y']) -> list[int | None]:
         if axis not in self._axes:
-            return [None]
-        return [self._axes.index(axis)]
+            return [None] * self.series_number
+        return [self._axes.index(axis)] * self.series_number
             
     @property
     def resolution(self) -> list[PixelSize | None]:
@@ -299,14 +313,27 @@ class TiffReader(ImageReader):
             logger.warning("FITS_TAG present but not valid JSON")
             return None
     
-    def _get_status_from_metadata(self) -> StatusFlag:
+    def _parse_info(self) -> dict[str, str]:
+        r"""
+        Convert ImageJ Info string to a dictionary. Expected format is 'key: value' per line, so the info output should be something like 'key: value\nkey2: value2\n...'.
+        """
         info = self._imageJ_meta.get("Info")
-        prefix = DEFAULT_FLAG_PREFIX
+        if not isinstance(info, str):
+            return {}
 
-        if not isinstance(info, str) or not info.startswith(prefix):
-            return DEFAULT_FLAG
+        out: dict[str, str] = {}
+        for line in info.splitlines():
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            out[key.strip()] = value.strip()
+        return out
+    
+    def _get_status_from_metadata(self) -> StatusFlag:
+        info = self._parse_info()
+        prefix = INFO_NAMESPACE
 
-        flag = info[len(prefix):].strip()
+        flag = info.get(f"{prefix}.status", DEFAULT_FLAG)
         return flag if flag in ALLOWED_FLAGS else DEFAULT_FLAG
     
     @property
@@ -324,7 +351,7 @@ class TiffReader(ImageReader):
     
     @property
     def export_status(self,) -> str:
-        return StatusProfile(status=self._status).export
+        return InfoProfile(status=self._status).export
     
     @property
     def channel_number(self) -> list[int]:
@@ -340,9 +367,9 @@ class TiffReader(ImageReader):
     @property
     def channel_labels(self) -> list[str] | None:
         labels = self._imageJ_meta.get('Labels', None)
-        if labels is None:
-            return None
-        return labels
+        if isinstance(labels, list) and all(isinstance(lbl, str) for lbl in labels):
+            return labels
+        return None
     
     @property
     def series_number(self) -> int:

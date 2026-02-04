@@ -1,15 +1,14 @@
-from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from numpy.typing import NDArray
 
 from fits_io.image_reader import ImageReader, StatusFlag, get_reader, Zproj
-from fits_io.writer import get_save_dirs, convert_to_fits_tif, save_fits_array, set_status
-from fits_io.provenance import create_export_profile
+from fits_io.writer import convert_to_fits_tif, save_fits_array, set_status, DEFAULT_FILENAME
+from fits_io.filesystem import get_save_dirs
 
-DISTRIBUTION_NAME = "fits_io"
-STEP_NAME = "fits_io.convert"
+DISTRIBUTION_NAME = "fits-io"
+STEP_NAME = "convert"
 
 class FitsIO:
     """
@@ -19,7 +18,7 @@ class FitsIO:
         self.reader = reader
         
     @classmethod
-    def from_path(cls, path: str | Path) -> FitsIO:
+    def from_path(cls, path: str | Path) -> 'FitsIO':
         reader = get_reader(path)
         return cls(reader)
     
@@ -67,27 +66,42 @@ class FitsIO:
         """
         return self.reader.get_channel(channel, z_projection=z_projection)
     
-    def get_save_dirs(self) -> Path | list[Path]:
+    # FIXME: For now, always return list of Paths, could be changed later
+    def get_save_dirs(self) -> list[Path]:
         """
         Get the output directory paths name to save experiment converted arrays.
         """
         return get_save_dirs(self.reader)
     
-    def convert_to_fits(self, *, channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', filename: str | None = None, user_defined_metadata: Mapping[str, Any] | None = None, compression: str | None = 'zlib', overwrite: bool = False) -> None:
+    def convert_to_fits(self, *, channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', distribution: str | None = DISTRIBUTION_NAME, step_name: str | None = STEP_NAME, filename: str = DEFAULT_FILENAME, user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None,compression: str | None = 'zlib', overwrite: bool = False) -> list[Path]:
         """
-        Convert an image file to a TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
+        Convert an image file to a FITS TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
         Args:
             channel_labels : Channel labels to include in the metadata. If None, generic labels will be created, by default None
             export_channels : Channels to export. Can be 'all' or a list of channel labels, by default 'all'
+            distribution : Name of the distribution or package, by default None
+            step_name : Name of the processing step, by default None
             filename : Optional name of the output TIFF file.
             user_defined_metadata : Additional custom metadata to include in the TIFF file, by default None
+            z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
             compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'. Possible values are 'zlib', 'lzma', 'zstd', 'lz4', 'lzw', 'packbits' and 'jpeg'
             overwrite : If True, overwrite existing files. If False and the output file exists, skip conversion, by default False
+        Returns:
+            List of Paths of the save directories.
         """
-        export_profile = create_export_profile(self.fits_metadata, DISTRIBUTION_NAME, STEP_NAME, filename)
-        convert_to_fits_tif(self.reader, channel_labels=channel_labels, export_channels=export_channels,export_profile=export_profile,user_defined_metadata=user_defined_metadata, compression=compression, overwrite=overwrite)
+        save_dirs = convert_to_fits_tif(self.reader, 
+                            channel_labels=channel_labels, 
+                            export_channels=export_channels,
+                            distribution=distribution, 
+                            step_name=step_name, 
+                            filename=filename,
+                            user_defined_metadata=user_defined_metadata,
+                            z_projection=z_projection, 
+                            compression=compression, 
+                            overwrite=overwrite)
+        return save_dirs
 
-    def save_fits_array(self, distribution: str | None = None, step_name: str | None = None, filename: str | None = None, user_metadata: Mapping[str, Any] | None = None, compression: str | None = 'zlib', overwrite: bool = False) -> None:
+    def save_fits_array(self, distribution: str | None = None, step_name: str | None = None, filename: str = DEFAULT_FILENAME, z_projection: Zproj = None, user_metadata: Mapping[str, Any] | None = None, compression: str | None = 'zlib', overwrite: bool = False) -> None:
         """
         Save the FITS array to a TIFF file with ImageJ metadata.
         
@@ -98,12 +112,19 @@ class FitsIO:
             distribution : Optional name of the distribution or package for provenance tracking.
             step_name : Optional name of the processing step for provenance tracking.
             filename : Optional name of the output TIFF file. 
+            z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
             user_metadata : Additional custom metadata to include in the TIFF file, by default None.
             compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'. Possible values are 'zlib', 'lzma', 'zstd', 'lz4', 'lzw', 'packbits' and 'jpeg'.
             overwrite : If True, overwrite existing files. If False and the output file exists, skip saving, by default False.
         """
-        export_profile = create_export_profile(self.fits_metadata, distribution, step_name, filename)
-        save_fits_array(self.reader, export_profile=export_profile, user_defined_metadata=user_metadata, compression=compression, overwrite=overwrite)
+        save_fits_array(self.reader, 
+                        distribution=distribution, 
+                        step_name=step_name, 
+                        filename=filename,
+                        user_defined_metadata=user_metadata, 
+                        z_projection=z_projection, 
+                        compression=compression, 
+                        overwrite=overwrite)
     
     def __getattr__(self, name: str) -> Any:
         return getattr(self.reader, name)

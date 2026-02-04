@@ -1,7 +1,7 @@
 [project]
 name = "fits-io"
-version = "0.3.0"
-description = "Add your description here"
+version = "0.4.0"
+description = "Module to read and write microscopy image files and convert them to FITS-TIFF format."
 readme = "README.md"
 authors = [
     { name = "Benoit Roux", email = "benoit.roux@gmail.com" }

@@ -6,8 +6,8 @@ import json
 from numpy.typing import NDArray
 import numpy as np
 
-from fits_io.provenance import FITS_TAG, add_provenance_profile, ExportProfile
-from fits_io.image_reader import ImageReader, StatusFlag, StatusProfile
+from fits_io.provenance import FITS_TAG, add_provenance_profile
+from fits_io.image_reader import ImageReader, StatusFlag, InfoProfile
 from fits_io._types import ExtraTags, PixelSize, PixelDensity
 
 COLOR_MAP = {
@@ -49,18 +49,21 @@ LABEL_TO_COLOR = {
     'grey': 'gray',
 }
 
-
+DEFAULT_STEP_NAME = 'unknown_step_1'
+DEFAULT_DISTRIBUTION = 'unknown_distribution'
 
 class StackMeta:
     
-    def __init__(self, axes: str, status: StatusFlag, finterval: float | None) -> None:
+    def __init__(self, axes: str, status: StatusFlag, user_name: str = 'unknown', finterval: float | None = None) -> None:
         self.axes = axes
         self._status: StatusFlag = status
+        self.user_name = user_name
         self.finterval = finterval
     
     @property
-    def status(self) -> str:
-        status_profile = StatusProfile(status=self._status)
+    def info(self) -> str:
+        """Return ImageJ-style Info string for status and user."""
+        status_profile = InfoProfile(status=self._status, user=self.user_name)
         return status_profile.export
     
     def change_status(self, new_status: StatusFlag) -> None:
@@ -68,7 +71,7 @@ class StackMeta:
     
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any]=  {'axes': self.axes,
-                             'Info': self.status}
+                             'Info': self.info}
         if self.finterval is not None:
             d['finterval'] = self.finterval
         return d
@@ -158,6 +161,7 @@ class TiffMetadata:
     resolution: PixelDensity | None = None
     extratags: ExtraTags | None = None
 
+
 def _encode_metadata(payload: Mapping[str, Any]) -> ExtraTags | None:
     """
     Encode metadata dictionary as JSON and prepare for storage in TIFF extra tags.
@@ -167,7 +171,7 @@ def _encode_metadata(payload: Mapping[str, Any]) -> ExtraTags | None:
         return [(FITS_TAG, "B", len(raw), raw, True)]
     return None
 
-def _update_metadata(original_meta: Mapping[str, Any], *, update_meta: Mapping[str, Any] | None, export_profile: ExportProfile | None = None) -> dict[str, Any]:
+def _update_metadata(original_meta: Mapping[str, Any], *, update_meta: Mapping[str, Any] | None, step_name: str) -> dict[str, Any]:
     """
     Update original metadata dictionary with values from update_meta.
     """
@@ -176,18 +180,42 @@ def _update_metadata(original_meta: Mapping[str, Any], *, update_meta: Mapping[s
     if update_meta is None:
         return out
     
-    if export_profile is not None:
-        out[export_profile.step_name].update(update_meta)
+    if step_name in out:
+        out[step_name].update(update_meta)
     else:
-        out.update(update_meta)
+        out[step_name] = dict(update_meta)
     return out
 
-def build_imagej_metadata(img_reader: ImageReader, *, export_profile: ExportProfile | None = None, channel_labels: str | Sequence[str] | None = None, extra_step_metadata: Mapping[str, Any] | None = None, new_status: StatusFlag | None = None, series_index: int = 0) -> TiffMetadata:
+def _get_step_name(original_meta: Mapping[str, Any], *, step_name: str | None) -> str:
+    """
+    Get the appropriate step name for provenance tracking.
+    
+    Args:
+        original_meta: Existing custom metadata mapping.
+        step_name: Optional desired step name.
+    """
+    step = step_name or DEFAULT_STEP_NAME
+    
+    if step == DEFAULT_STEP_NAME:
+        meta_keys = original_meta.keys()
+        prefix = DEFAULT_STEP_NAME.rsplit("_", 1)[0]
+        unknown_keys = [k for k in meta_keys if k.startswith(prefix)]
+        
+        numbers = [int(k.split("_")[-1]) for k in unknown_keys if k.split("_")[-1].isdigit()]
+        next_instance = max(numbers) + 1 if numbers else 1
+        step = f"{prefix}_{next_instance}"
+    
+    return step
+
+def build_imagej_metadata(img_reader: ImageReader, *, user_name: str, distribution: str | None = None, step_name: str | None = None, channel_labels: str | Sequence[str] | None = None, extra_step_metadata: Mapping[str, Any] | None = None, new_status: StatusFlag | None = None, series_index: int = 0) -> TiffMetadata:
     """
     Build ImageJ-compatible metadata for saving TIFF files.
     
     Args:
         img_reader: An ImageReader instance to read metadata from.
+        user_name: Name of the user performing the conversion.
+        distribution: Optional; name of the distribution or package.
+        step_name: Optional; name of the processing step.
         channel_labels: Optional; either a single string label or a sequence of labels for each channel. If None, default labels will be used.
         extra_step_metadata: Optional mapping of additional metadata to include in the processing step.
         new_status: Optional; if provided, overrides the status in the metadata.
@@ -202,26 +230,30 @@ def build_imagej_metadata(img_reader: ImageReader, *, export_profile: ExportProf
         input_channel_labels = channel_labels
     
     # extract metadata components
-    stack_meta = StackMeta(axes=img_reader.axes[series_index], 
-                           status=img_reader.status,
-                           finterval=img_reader.interval)
-    if new_status is not None:
-        stack_meta.change_status(new_status)
     channel_meta = ChannelMeta(channel_number=img_reader.channel_number[series_index], labels=input_channel_labels)
     resolution_meta = ResolutionMeta(img_reader.resolution[series_index])
+    stack_meta = StackMeta(axes=img_reader.axes[series_index], 
+                           status=img_reader.status,
+                           user_name=user_name,
+                           finterval=img_reader.interval)
+    
+    # build custom metadata to be stored in private tag
+    payload = img_reader.custom_metadata
+    
+    if new_status is None: # Add new processing step to provenance
+        dist = distribution or DEFAULT_DISTRIBUTION
+        step = _get_step_name(payload, step_name=step_name)
+        payload = add_provenance_profile(payload, distribution=dist, step_name=step)
+        payload = _update_metadata(payload, update_meta=extra_step_metadata, step_name=step)
+    else: # Skip the provenance addition, just change status
+        stack_meta.change_status(new_status)
+    
+    extratags = _encode_metadata(payload)
     
     # build final metadata dict
     metadata_dict = stack_meta.to_dict()
     metadata_dict.update(channel_meta.to_dict())
     metadata_dict.update(resolution_meta.to_dict())
-    
-    # build custom metadata to be stored in private tag
-    extratags: ExtraTags | None = None
-    
-    existing_metadata = img_reader.custom_metadata
-    payload = add_provenance_profile(existing_metadata, export_profile=export_profile)
-    payload = _update_metadata(payload, update_meta=extra_step_metadata, export_profile=export_profile)
-    extratags = _encode_metadata(payload)
     
     return TiffMetadata(
         imagej_meta=metadata_dict,

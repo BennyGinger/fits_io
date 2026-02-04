@@ -136,15 +136,6 @@ def test_generate_save_dirs_creates_one_folder_per_series(tmp_path: Path) -> Non
         assert d.is_dir()
 
 
-@pytest.mark.parametrize("bad_series_number", [0, -1, -10])
-def test_generate_save_dirs_raises_if_no_arrays(tmp_path: Path, bad_series_number: int) -> None:
-    input_path = tmp_path / "img.tif"
-    input_path.write_bytes(b"")
-
-    reader = DummyReader(img_path=input_path, series_number=bad_series_number, channel_labels=["C1"])
-
-    with pytest.raises(ValueError, match="no readable arrays"):
-        get_save_dirs(reader)
 
 def test_generate_save_dirs_is_idempotent_on_existing_dirs(tmp_path: Path) -> None:
     input_path = tmp_path / "input" / "image.tif"

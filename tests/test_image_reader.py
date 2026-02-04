@@ -110,7 +110,7 @@ def test_tiff_status_reads_valid_flag(monkeypatch, tmp_path: Path):
 
     r = m.TiffReader(p)
     assert r.status == "skip"
-    assert r.export_status == "fits_io.status: skip\n"
+    assert r.export_status == "fits_io.status: skip\nfits_io.user: unknown\n"
 
 
 @pytest.mark.parametrize(

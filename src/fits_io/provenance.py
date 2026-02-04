@@ -1,40 +1,13 @@
-from dataclasses import dataclass
 from importlib.metadata import version, PackageNotFoundError
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Mapping
+
+from fits.environment.constant_variables import FITS_FILES
 
 # Custom FITS tag number for storing processing provenance metadata in TIFF files
 FITS_TAG = 65000
-DEFAULT_FILENAME = 'fits.tif'
-DEFAULT_STEP_NAME = 'fits_io.unknown_step_1'
-DEFAULT_DISTRIBUTION = 'unknown_distribution'
 
-@dataclass(frozen=True)
-class ExportProfile:
-    """Class representing an export profile for fits image conversion or saving.
-    Attributes:
-        dist_name: Name of the distribution or package.
-        step_name: Name of the processing step.
-        filename: Default filename for the exported file.
-    """
-    dist_name: str 
-    step_name: str
-    filename: str
-
-def create_export_profile(fits_metadata: Mapping[str, Any], distribution: str | None, step_name: str | None, filename: str | None) -> ExportProfile:
-    dist = distribution or DEFAULT_DISTRIBUTION
-    file = filename or DEFAULT_FILENAME
-    step = step_name or DEFAULT_STEP_NAME
-    if step == DEFAULT_STEP_NAME:
-        meta_keys = fits_metadata.keys()
-        unknown_keys = [k for k in meta_keys if k.startswith("fits_io.unknown_step_")]
-        
-        if unknown_keys:
-            numbers = [int(k.split("_")[-1]) for k in unknown_keys if k.split("_")[-1].isdigit()]
-            next_instance = max(numbers) + 1
-            step = f"fits_io.unknown_step_{next_instance}"
-    
-    return ExportProfile(dist_name=dist, step_name=step, filename=file)
 
 def get_dist_version(dist_name: str) -> str:
     try:
@@ -45,12 +18,13 @@ def get_dist_version(dist_name: str) -> str:
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-def add_provenance_profile(custom_metadata: Mapping[str, Any], *, export_profile: ExportProfile | None = None) -> dict[str, Any]:
+def add_provenance_profile(custom_metadata: Mapping[str, Any], *, distribution: str, step_name: str) -> dict[str, Any]:
     """
     Small helper to add a provenance profile to custom metadata while saving the TIFF.
     Args:
         custom_metadata: Existing custom metadata mapping.
-        export_profile: ExportProfile instance containing distribution and step information.
+        distribution: Name of the distribution or package.
+        step_name: Name of the processing step.
         
     Returns:
         Updated custom metadata dictionary including the new step.
@@ -58,14 +32,35 @@ def add_provenance_profile(custom_metadata: Mapping[str, Any], *, export_profile
     
     out = dict(custom_metadata)
     
-    if export_profile is not None:
-        out[export_profile.step_name] = {
-            "dist": export_profile.dist_name,
-            "version": get_dist_version(export_profile.dist_name),
-            "timestamp": utc_now_iso(),
+    out[step_name] = {
+        "dist": distribution,
+        "version": get_dist_version(distribution),
+        "timestamp": utc_now_iso(),
         }
     return out
 
+def series_has_outputs(save_dir: Path) -> bool:
+    """Check if a given series directory contains converted FITS arrays.
+    
+    Args:
+        save_dir: Path to the series directory.
+    Returns:
+        True if the directory exists and contains at least one file, False otherwise.
+    """
+    if not save_dir.is_dir():
+        return False
+    
+    return any((save_dir / name).is_file() for name in FITS_FILES)
+
+def image_converted(save_dirs: list[Path]) -> bool:
+    """
+    Check if all series of an image have been converted and saved.
+    Args:
+        save_dirs: List of Paths to the series directories of an image.
+    Returns:
+        True if all series directories exist and contain converted FITS arrays, False otherwise.
+    """
+    return all(series_has_outputs(d) for d in save_dirs)
 
 def is_processed(custom_metadata: Mapping[str, Any], *, step: str) -> bool:
     if not isinstance(custom_metadata, Mapping):

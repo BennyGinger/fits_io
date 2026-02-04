@@ -7,7 +7,7 @@ from numpy.typing import NDArray
 import numpy as np
 from tifffile import imwrite
 
-from fits_io.provenance import is_processed, get_timestamp, ExportProfile
+from fits_io.provenance import image_converted, is_processed, get_timestamp
 from fits_io.image_reader import ImageReader, TiffReader, StatusFlag, ALLOWED_FLAGS, Zproj
 from fits_io.metadata import build_imagej_metadata, TiffMetadata
 from fits_io.filesystem import get_save_dirs, build_output_path, mkdirs_paths
@@ -15,6 +15,7 @@ from fits_io.filesystem import get_save_dirs, build_output_path, mkdirs_paths
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_FILENAME = 'fits.tif'
 
 def _save_tiff(img_array: NDArray, save_path: Path, metadata: TiffMetadata, compression: str | None = 'zlib') -> None:
     
@@ -64,80 +65,96 @@ def _get_array_to_export(img_reader: ImageReader, channel_labels: str | Sequence
     
     return arrays, selected_channels
 
-def convert_to_fits_tif(img_reader: ImageReader, *, export_profile: ExportProfile, channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib', overwrite: bool = False) -> None:
+def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', distribution: str | None = None, step_name: str | None = None, filename: str = DEFAULT_FILENAME, channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib', overwrite: bool = False) -> list[Path]:
     """
-    Convert an image file to a TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
+    Convert an image file to a FITS TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
     Args:
         img_reader : An ImageReader instance for the input image.
+        user_name : Name of the user performing the conversion, by default 'unknown'
+        distribution : Name of the distribution or package, by default None
+        step_name : Name of the processing step, by default None
+        filename : Optional name of the output TIFF file.
         channel_labels : Channel labels to include in the metadata. If None, uses labels from the input file, by default None
-        export_profile : ExportProfile instance containing distribution and step information.
         export_channels : Channels to export. Can be 'all' or a list of channel labels, by default 'all'
         user_defined_metadata : Additional custom metadata to include in the TIFF file, by default None
+        z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
         compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'
         overwrite : If True, overwrite existing files. If False and the output file exists, skip conversion, by default False
+    Returns:
+        List of Paths of the save directories.
     """
-    # check if exp was processed/registered
-    if is_processed(img_reader.custom_metadata, step=export_profile.step_name) and not overwrite:
-        timestamp = get_timestamp(img_reader.custom_metadata, step=export_profile.step_name)
-        print(f"Image {img_reader.img_path} has already been processed at {timestamp}. Skipping conversion.")
-        logger.info(f"Image {img_reader.img_path} has already been processed at {timestamp}. Skipping conversion.")
-        return
+    # Get the save directories of the image
+    save_dirs = get_save_dirs(img_reader)
     
-    # set default channel labels to be initialized if user did not provide any
+    # check if exp was processed/registered
+    if image_converted(save_dirs) and not overwrite:
+        logger.info(f"Image {img_reader.img_path} has already been converted. Skipping conversion.")
+        return save_dirs
+    
+    # Generate save path(s)
+    save_dirs = mkdirs_paths(save_dirs)
+    save_path_lst = [build_output_path(save_dir, save_name=filename) for save_dir in save_dirs]
+    
+    # Set default channel labels to be initialized if user did not provide any
     if channel_labels is None:
         channel_labels = 'initialize'
     
-    # Generate save path(s)
-    save_dirs = get_save_dirs(img_reader)
-    save_dirs = mkdirs_paths(save_dirs)
-    save_path_lst = [build_output_path(save_dir, save_name=export_profile.filename) for save_dir in save_dirs]
-    
     # Get the image array(s)
-    arrays, used_channels = _get_array_to_export(img_reader, channel_labels=channel_labels, export_channels=export_channels, z_projection=z_projection)
+    arrays, used_channels = _get_array_to_export(img_reader, 
+                                                channel_labels=channel_labels, export_channels=export_channels, 
+                                                z_projection=z_projection)
     
-    # get metadata
+    # Prepare metadata
     build_md = partial(build_imagej_metadata,
                         img_reader,
-                        export_profile=export_profile,
+                        user_name=user_name,
+                        distribution=distribution,
+                        step_name=step_name,
                         channel_labels=used_channels,
                         extra_step_metadata=user_defined_metadata)
     
-    # write tiff with metadata and reader
+    # Write FITS TIFF with metadata and reader
     if len(arrays) != len(save_path_lst):
         raise ValueError(f"Got {len(arrays)} arrays but {len(save_path_lst)} save paths")
 
     for i, (array, path) in enumerate(zip(arrays, save_path_lst)):
-        # build metadata for this series
+        # finish building metadata
         meta = build_md(series_index=i)
-        # save tiff
+        # save TIFF
         _save_tiff(array, path, meta, compression=compression)
+    return save_dirs
 
-def save_fits_array(img_reader: ImageReader, *, export_profile: ExportProfile, user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib', overwrite: bool = False) -> None:
+def save_fits_array(img_reader: ImageReader, *, distribution: str | None = None, step_name: str | None = None, filename: str = DEFAULT_FILENAME, user_name: str = 'unknown', user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib', overwrite: bool = False) -> None:
     """Save the FITS array from an ImageReader instance to a TIFF file with ImageJ metadata.
     
     Args:
         img_reader : An ImageReader instance for the input image.
-        dist_name : Name of the distribution or package.
+        distribution : Name of the distribution or package.
         step_name : Name of the processing step.
+        filename : Optional name of the output TIFF file. If None, uses 'fits.tif' by default.
+        user_name : Name of the user performing the save, by default 'unknown'
         user_defined_metadata : Additional custom metadata to include in the TIFF file, by default None
         compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'
         overwrite : If True, overwrite existing files. If False and the output file exists, skip saving, by default False
     """
     # check if exp was processed/registered
-    if is_processed(img_reader.custom_metadata, step=export_profile.step_name) and not overwrite:
-        timestamp = get_timestamp(img_reader.custom_metadata, step=export_profile.step_name)
+    meta = img_reader.custom_metadata
+    if isinstance(step_name, str) and is_processed(meta, step=step_name) and not overwrite:
+        timestamp = get_timestamp(meta, step=step_name)
         print(f"Image {img_reader.img_path} has already been processed at {timestamp}. Skipping conversion.")
         logger.info(f"Image {img_reader.img_path} has already been processed at {timestamp}. Skipping conversion.")
         return
 
     # get metadata
     meta = build_imagej_metadata(img_reader, 
-                                 export_profile=export_profile,
+                                 distribution=distribution,
+                                 step_name=step_name,
+                                 user_name=user_name,
                                  extra_step_metadata=user_defined_metadata)
     
     # Generate save path
     save_dir = img_reader.img_path.parent
-    save_path = build_output_path(save_dir, save_name=export_profile.filename)
+    save_path = build_output_path(save_dir, save_name=filename)
     array = img_reader.get_array(z_projection)
     
     if isinstance(array, list):
@@ -145,7 +162,7 @@ def save_fits_array(img_reader: ImageReader, *, export_profile: ExportProfile, u
     
     _save_tiff(array, save_path, meta, compression=compression)
 
-def set_status(img_reader: ImageReader, status: StatusFlag) -> None:
+def set_status(img_reader: ImageReader, status: StatusFlag, user_name: str = 'unknown') -> None:
     """
     Set the status of the image to either 'active' or 'skip'.
     
@@ -155,6 +172,7 @@ def set_status(img_reader: ImageReader, status: StatusFlag) -> None:
     Args:
         img_reader : An ImageReader instance for the input image.
         status : The status string to set.
+        user_name : Name of the user setting the status, by default 'unknown'
     """
     if not isinstance(img_reader, TiffReader):
         raise TypeError("set_status only supports .tif/.tiff files.")
@@ -163,6 +181,7 @@ def set_status(img_reader: ImageReader, status: StatusFlag) -> None:
         raise ValueError(f"Invalid status: {status}. Must be one of {ALLOWED_FLAGS}")
     
     meta = build_imagej_metadata(img_reader,
+                                 user_name=user_name,
                                  new_status=status)
     
     array = img_reader.get_array()
@@ -185,7 +204,7 @@ if __name__ == '__main__':
     
     new_path = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run2/c2z25t23v1_tif.tif')
     reader = get_reader(new_path)
-    convert_to_fits_tif(reader, export_profile=ExportProfile(filename='fits_array.tif', step_name='conversion', dist_name='fits_io'), overwrite=True)
+    convert_to_fits_tif(reader)
     
     
 

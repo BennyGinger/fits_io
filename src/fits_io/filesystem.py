@@ -10,35 +10,31 @@ DEFAULT_SAVE_NAME = "array.tif"
 def ends_with_s_number(string: str) -> bool:
     return bool(re.search(r'_s[0-9][0-9]{0,2}$', string))
 
-def get_save_dirs(img_reader: ImageReader) -> Path | list[Path]:
+def get_save_dirs(img_reader: ImageReader) -> list[Path]:
     """Get the output directory paths name to save experiment converted arrays.
 
     Policy:
     - Always create a per-series folder '<input_stem>_sN', even for a single series (N=1).
-    - Check the parent directory of the input file and if it is already containing a '_sN', then return that directory only.
+    - If file is already a fits file then parent directory already contains a '_sN' pattern. In that case return the parent directory as is.
 
     Args:
         img_reader:
             ImageReader instance describing the input image and its series.
 
     Returns:
-        Path or list of directory paths, one per image series, ready to be written.
+        list[Path]: List of directory paths, one per image series, ready to be written.
     """
-    
-    nb_arrays = img_reader.series_number
-    
-    if nb_arrays < 1:
-        raise ValueError("ImageReader contains no readable arrays")
-    
     # Generate save directories
     base_name = img_reader.img_path.stem
     parent_dir = img_reader.img_path.parent
     
-    # Check if the parent directory already contains a '_sN' pattern
+    # If files already a fits file then parent directory already contains a '_sN' pattern
     if ends_with_s_number(parent_dir.name):
-        return parent_dir
+        return [parent_dir]
     
+    # Otherwise create per-series directories
     save_dirs: list[Path] = []
+    nb_arrays = img_reader.series_number
     for idx in range(nb_arrays):
         save_dir = parent_dir / f"{base_name}_s{idx+1}"
         save_dirs.append(save_dir)
@@ -51,11 +47,8 @@ def mkdirs_paths(paths: Path | Sequence[Path]) -> list[Path]:
     Args:
         paths: A single Path or a list of Paths to create directories for.
     """
-    if isinstance(paths, Path):
-        paths_lst = [paths]
-    else:
-        paths_lst = list(paths)
-        
+    paths_lst = [paths] if isinstance(paths, Path) else list(paths)
+    
     for path in paths_lst:
         path.mkdir(parents=True, exist_ok=True)
     return paths_lst

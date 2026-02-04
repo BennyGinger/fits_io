@@ -1,126 +1,6 @@
 from datetime import datetime, timezone
 
-from fits_io.provenance import create_export_profile, DEFAULT_DISTRIBUTION, DEFAULT_STEP_NAME, DEFAULT_FILENAME, get_dist_version, get_timestamp, is_processed, add_provenance_profile, utc_now_iso, ExportProfile
-
-# test create_export_profile function
-def test_all_none_uses_defaults():
-    """When all parameters are None, should use all defaults."""
-    profile = create_export_profile({}, None, None, None)
-    
-    assert profile.dist_name == DEFAULT_DISTRIBUTION
-    assert profile.step_name == DEFAULT_STEP_NAME
-    assert profile.filename == DEFAULT_FILENAME
-
-
-def test_custom_distribution():
-    """Custom distribution should override default."""
-    profile = create_export_profile({}, "my_dist", None, None)
-    
-    assert profile.dist_name == "my_dist"
-    assert profile.step_name == DEFAULT_STEP_NAME
-    assert profile.filename == DEFAULT_FILENAME
-
-
-def test_custom_step_name():
-    """Custom step_name should override default."""
-    profile = create_export_profile({}, None, "my_step", None)
-    
-    assert profile.dist_name == DEFAULT_DISTRIBUTION
-    assert profile.step_name == "my_step"
-    assert profile.filename == DEFAULT_FILENAME
-
-
-def test_custom_filename():
-    """Custom filename should override default."""
-    profile = create_export_profile({}, None, None, "output.tif")
-    
-    assert profile.dist_name == DEFAULT_DISTRIBUTION
-    assert profile.step_name == DEFAULT_STEP_NAME
-    assert profile.filename == "output.tif"
-
-
-def test_all_custom():
-    """All custom parameters should be respected."""
-    profile = create_export_profile({}, "dist", "step", "file.tif")
-    
-    assert profile.dist_name == "dist"
-    assert profile.step_name == "step"
-    assert profile.filename == "file.tif"
-
-
-def test_increments_unknown_step_when_exists():
-    """When unknown_step_N exists in metadata, should increment to N+1."""
-    metadata = {
-        "fits_io.unknown_step_1": {"some": "data"},
-        "fits_io.unknown_step_2": {"more": "data"},
-    }
-    
-    profile = create_export_profile(metadata, None, None, None)
-    
-    assert profile.step_name == "fits_io.unknown_step_3"
-
-
-def test_increments_unknown_step_single_existing():
-    """When only unknown_step_1 exists, should become unknown_step_2."""
-    metadata = {"fits_io.unknown_step_1": {"some": "data"}}
-    
-    profile = create_export_profile(metadata, None, None, None)
-    
-    assert profile.step_name == "fits_io.unknown_step_2"
-
-
-def test_no_increment_if_custom_step_provided():
-    """Custom step_name should not trigger incrementing logic."""
-    metadata = {"fits_io.unknown_step_1": {"some": "data"}}
-    
-    profile = create_export_profile(metadata, None, "custom_step", None)
-    
-    assert profile.step_name == "custom_step"
-
-
-def test_handles_non_numeric_unknown_steps():
-    """Should skip unknown_step keys that don't end with digits."""
-    metadata = {
-        "fits_io.unknown_step_1": {"some": "data"},
-        "fits_io.unknown_step_abc": {"bad": "format"},
-    }
-    
-    profile = create_export_profile(metadata, None, None, None)
-    
-    assert profile.step_name == "fits_io.unknown_step_2"
-
-
-def test_handles_empty_metadata():
-    """Empty metadata should result in unknown_step_1."""
-    profile = create_export_profile({}, None, None, None)
-    
-    assert profile.step_name == DEFAULT_STEP_NAME
-
-
-def test_handles_other_metadata_keys():
-    """Should ignore metadata keys that don't match unknown_step pattern."""
-    metadata = {
-        "some_other_key": {"data": "value"},
-        "fits_io.convert": {"step": "info"},
-        "fits_io.unknown_step_1": {"first": "step"},
-    }
-    
-    profile = create_export_profile(metadata, None, None, None)
-    
-    assert profile.step_name == "fits_io.unknown_step_2"
-
-
-def test_handles_non_sequential_unknown_steps():
-    """Should increment from max, even if numbers are non-sequential."""
-    metadata = {
-        "fits_io.unknown_step_1": {},
-        "fits_io.unknown_step_5": {},
-        "fits_io.unknown_step_3": {},
-    }
-    
-    profile = create_export_profile(metadata, None, None, None)
-    
-    assert profile.step_name == "fits_io.unknown_step_6"
+from fits_io.provenance import get_dist_version, get_timestamp, is_processed, add_provenance_profile, utc_now_iso
 
 
 # Tests for get_dist_version
@@ -166,9 +46,7 @@ def test_utc_now_iso_is_utc_timezone():
 # Tests for add_provenance_profile
 def test_add_provenance_profile_adds_step_to_empty_metadata():
     """Should add step metadata to empty dict."""
-    profile = ExportProfile(dist_name="my-dist", step_name="my_step", filename="test.tif")
-    
-    result = add_provenance_profile({}, export_profile=profile)
+    result = add_provenance_profile({}, distribution="my-dist", step_name="my_step")
     
     assert "my_step" in result
     assert result["my_step"]["dist"] == "my-dist"
@@ -182,9 +60,7 @@ def test_add_provenance_profile_preserves_existing_metadata():
         "existing_step": {"some": "data"},
         "other_key": "value",
     }
-    profile = ExportProfile(dist_name="my-dist", step_name="new_step", filename="test.tif")
-    
-    result = add_provenance_profile(existing, export_profile=profile)
+    result = add_provenance_profile(existing, distribution="my-dist", step_name="new_step")
     
     assert "existing_step" in result
     assert result["existing_step"] == {"some": "data"}
@@ -195,9 +71,7 @@ def test_add_provenance_profile_preserves_existing_metadata():
 def test_add_provenance_profile_does_not_mutate_input():
     """Should not modify the input metadata dict."""
     original = {"key": "value"}
-    profile = ExportProfile(dist_name="my-dist", step_name="step", filename="test.tif")
-    
-    result = add_provenance_profile(original, export_profile=profile)
+    result = add_provenance_profile(original, distribution="my-dist", step_name="step")
     
     assert "step" not in original
     assert original == {"key": "value"}
@@ -205,14 +79,13 @@ def test_add_provenance_profile_does_not_mutate_input():
 
 def test_add_provenance_profile_includes_timestamp():
     """Should include ISO format timestamp."""
-    profile = ExportProfile(dist_name="my-dist", step_name="step", filename="test.tif")
-    
-    result = add_provenance_profile({}, export_profile=profile)
+    result = add_provenance_profile({}, distribution="my-dist", step_name="step")
     
     timestamp = result["step"]["timestamp"]
     assert isinstance(timestamp, str)
     # Should be parseable
     datetime.fromisoformat(timestamp)
+
 
 
 # Tests for is_processed
