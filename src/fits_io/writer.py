@@ -15,7 +15,7 @@ from fits_io.filesystem import get_save_dirs, build_output_path, mkdirs_paths
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_FILENAME = 'fits.tif'
+DEFAULT_OUTPUT_NAME = 'fits.tif'
 
 def _save_tiff(img_array: NDArray, save_path: Path, metadata: TiffMetadata, compression: str | None = 'zlib') -> None:
     
@@ -65,7 +65,7 @@ def _get_array_to_export(img_reader: ImageReader, channel_labels: str | Sequence
     
     return arrays, selected_channels
 
-def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', distribution: str | None = None, step_name: str | None = None, filename: str = DEFAULT_FILENAME, channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib', overwrite: bool = False) -> list[Path]:
+def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', distribution: str | None = None, step_name: str | None = None, output_name: str = DEFAULT_OUTPUT_NAME, channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib', overwrite: bool = False) -> list[Path]:
     """
     Convert an image file to a FITS TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
     Args:
@@ -73,7 +73,7 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
         user_name : Name of the user performing the conversion, by default 'unknown'
         distribution : Name of the distribution or package, by default None
         step_name : Name of the processing step, by default None
-        filename : Optional name of the output TIFF file.
+        output_name : Optional name of the output TIFF file.
         channel_labels : Channel labels to include in the metadata. If None, uses labels from the input file, by default None
         export_channels : Channels to export. Can be 'all' or a list of channel labels, by default 'all'
         user_defined_metadata : Additional custom metadata to include in the TIFF file, by default None
@@ -93,7 +93,7 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
     
     # Generate save path(s)
     save_dirs = mkdirs_paths(save_dirs)
-    save_path_lst = [build_output_path(save_dir, save_name=filename) for save_dir in save_dirs]
+    save_path_lst = [build_output_path(save_dir, save_name=output_name) for save_dir in save_dirs]
     
     # Set default channel labels to be initialized if user did not provide any
     if channel_labels is None:
@@ -124,27 +124,18 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
         _save_tiff(array, path, meta, compression=compression)
     return save_dirs
 
-def save_fits_array(img_reader: ImageReader, *, distribution: str | None = None, step_name: str | None = None, filename: str = DEFAULT_FILENAME, user_name: str = 'unknown', user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib', overwrite: bool = False) -> None:
+def save_fits_array(img_reader: ImageReader, *, distribution: str | None = None, step_name: str | None = None, output_name: str = DEFAULT_OUTPUT_NAME, user_name: str = 'unknown', user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib') -> None:
     """Save the FITS array from an ImageReader instance to a TIFF file with ImageJ metadata.
     
     Args:
         img_reader : An ImageReader instance for the input image.
         distribution : Name of the distribution or package.
         step_name : Name of the processing step.
-        filename : Optional name of the output TIFF file. If None, uses 'fits.tif' by default.
+        output_name : Optional name of the output TIFF file. If None, uses 'fits.tif' by default.
         user_name : Name of the user performing the save, by default 'unknown'
         user_defined_metadata : Additional custom metadata to include in the TIFF file, by default None
         compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'
-        overwrite : If True, overwrite existing files. If False and the output file exists, skip saving, by default False
     """
-    # check if exp was processed/registered
-    meta = img_reader.custom_metadata
-    if isinstance(step_name, str) and is_processed(meta, step=step_name) and not overwrite:
-        timestamp = get_timestamp(meta, step=step_name)
-        print(f"Image {img_reader.img_path} has already been processed at {timestamp}. Skipping conversion.")
-        logger.info(f"Image {img_reader.img_path} has already been processed at {timestamp}. Skipping conversion.")
-        return
-
     # get metadata
     meta = build_imagej_metadata(img_reader, 
                                  distribution=distribution,
@@ -154,7 +145,7 @@ def save_fits_array(img_reader: ImageReader, *, distribution: str | None = None,
     
     # Generate save path
     save_dir = img_reader.img_path.parent
-    save_path = build_output_path(save_dir, save_name=filename)
+    save_path = build_output_path(save_dir, save_name=output_name)
     array = img_reader.get_array(z_projection)
     
     if isinstance(array, list):

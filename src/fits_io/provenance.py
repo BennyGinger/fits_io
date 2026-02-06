@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from fits.environment.constant_variables import FITS_FILES
+from fits.environment.constant import FITS_FILES
 
 # Custom FITS tag number for storing processing provenance metadata in TIFF files
 FITS_TAG = 65000
