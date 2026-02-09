@@ -88,9 +88,9 @@ class FitsIO:
             compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'. Possible values are 'zlib', 'lzma', 'zstd', 'lz4', 'lzw', 'packbits' and 'jpeg'
             overwrite : If True, overwrite existing files. If False and the output file exists, skip conversion, by default False
         Returns:
-            List of Paths of the save directories.
+            List of Paths of the saved TIFF files.
         """
-        save_dirs = convert_to_fits_tif(self.reader,
+        save_paths = convert_to_fits_tif(self.reader,
                             user_name=user_name,
                             channel_labels=channel_labels, 
                             export_channels=export_channels,
@@ -101,7 +101,7 @@ class FitsIO:
                             z_projection=z_projection, 
                             compression=compression, 
                             overwrite=overwrite)
-        return save_dirs
+        return save_paths
 
     def save_fits_array(self, user_name: str = 'unknown', distribution: str | None = None, step_name: str | None = None, output_name: str = DEFAULT_OUTPUT_NAME, z_projection: Zproj = None, user_metadata: Mapping[str, Any] | None = None, compression: str | None = 'zlib') -> None:
         """

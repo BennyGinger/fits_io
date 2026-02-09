@@ -81,7 +81,7 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
         compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'
         overwrite : If True, overwrite existing files. If False and the output file exists, skip conversion, by default False
     Returns:
-        List of Paths of the save directories.
+        List of Paths of the saved TIFF files.
     """
     # Get the save directories of the image
     save_dirs = get_save_dirs(img_reader)
@@ -122,7 +122,7 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
         meta = build_md(series_index=i)
         # save TIFF
         _save_tiff(array, path, meta, compression=compression)
-    return save_dirs
+    return save_path_lst
 
 def save_fits_array(img_reader: ImageReader, *, distribution: str | None = None, step_name: str | None = None, output_name: str = DEFAULT_OUTPUT_NAME, user_name: str = 'unknown', user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib') -> None:
     """Save the FITS array from an ImageReader instance to a TIFF file with ImageJ metadata.
