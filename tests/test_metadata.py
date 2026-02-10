@@ -221,8 +221,8 @@ def test_build_imagej_metadata_resolution_payload_is_pixel_size_um_per_px():
     assert step_meta["resolution"] == [0.5, 0.25] or step_meta["resolution"] == (0.5, 0.25)
 
 
-def test_build_imagej_metadata_with_new_status_does_not_create_provenance():
-    """When new_status is provided, only status should change, no provenance added."""
+def test_build_imagej_metadata_with_new_status_preserves_provenance():
+    """When new_status is provided, status should change and provenance is still added."""
     reader = DummyReader(resolution=(1.0, 1.0), custom_metadata={"existing": "data"})
     out = md.build_imagej_metadata(
         cast(md.ImageReader, reader),
@@ -235,7 +235,7 @@ def test_build_imagej_metadata_with_new_status_does_not_create_provenance():
     # Status should be changed in ImageJ metadata
     assert "skip" in out.imagej_meta["Info"]
     
-    # Extratags should preserve existing metadata but NOT add new provenance
+    # Extratags should preserve existing metadata and still add provenance
     assert out.extratags is not None
     raw = out.extratags[0][3]
     payload = json.loads(raw.decode("utf-8"))
@@ -243,5 +243,69 @@ def test_build_imagej_metadata_with_new_status_does_not_create_provenance():
     # Existing metadata should be preserved
     assert payload["existing"] == "data"
     
-    # New provenance step should NOT be added
+    # New provenance step should be added
+    assert "test_step" in payload
+
+
+def test_build_imagej_metadata_add_provenance_false_skips_provenance_step():
+    reader = DummyReader(resolution=(1.0, 1.0), custom_metadata={"existing": "data"})
+    out = md.build_imagej_metadata(
+        cast(md.ImageReader, reader),
+        user_name="test_user",
+        distribution="test-dist",
+        step_name="test_step",
+        add_provenance=False,
+    )
+
+    assert out.extratags is not None
+    raw = out.extratags[0][3]
+    payload = json.loads(raw.decode("utf-8"))
+
+    assert payload["existing"] == "data"
     assert "test_step" not in payload
+
+
+def test_build_imagej_metadata_add_provenance_false_ignores_extra_step_metadata():
+    reader = DummyReader(resolution=(1.0, 1.0), custom_metadata={"existing": "data"})
+    out = md.build_imagej_metadata(
+        cast(md.ImageReader, reader),
+        user_name="test_user",
+        distribution="test-dist",
+        step_name="test_step",
+        extra_step_metadata={"resolution": (0.5, 0.25)},
+        add_provenance=False,
+    )
+
+    assert out.extratags is not None
+    raw = out.extratags[0][3]
+    payload = json.loads(raw.decode("utf-8"))
+
+    assert payload["existing"] == "data"
+    assert "test_step" not in payload
+
+
+# -------------------------
+# _normalize_channel_labels
+# -------------------------
+
+def test_normalize_channel_labels_none_returns_none():
+    assert md._normalize_channel_labels(None, n_channels=3) is None
+
+
+def test_normalize_channel_labels_string_with_one_channel():
+    assert md._normalize_channel_labels("GFP", n_channels=1) == ["GFP"]
+
+
+def test_normalize_channel_labels_string_with_multiple_channels_raises():
+    with pytest.raises(ValueError):
+        md._normalize_channel_labels("GFP", n_channels=2)
+
+
+def test_normalize_channel_labels_sequence_matches_channel_count():
+    labels = ["GFP", "mCherry"]
+    assert md._normalize_channel_labels(labels, n_channels=2) == labels
+
+
+def test_normalize_channel_labels_sequence_wrong_length_raises():
+    with pytest.raises(ValueError):
+        md._normalize_channel_labels(["GFP"], n_channels=2)

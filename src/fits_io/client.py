@@ -4,7 +4,7 @@ from typing import Any, Mapping, Sequence
 from numpy.typing import NDArray
 
 from fits_io.image_reader import ImageReader, StatusFlag, get_reader, Zproj
-from fits_io.writer import convert_to_fits_tif, save_fits_array, set_status, DEFAULT_OUTPUT_NAME
+from fits_io.writer import convert_to_fits_tif, save_fits_array, set_channel_labels, set_status, DEFAULT_OUTPUT_NAME
 from fits_io.filesystem import get_save_dirs
 
 DISTRIBUTION_NAME = "fits-io"
@@ -18,8 +18,8 @@ class FitsIO:
         self.reader = reader
         
     @classmethod
-    def from_path(cls, path: str | Path) -> 'FitsIO':
-        reader = get_reader(path)
+    def from_path(cls, path: str | Path, channel_labels: list[str] | None = None) -> 'FitsIO':
+        reader = get_reader(path, channel_labels=channel_labels)
         return cls(reader)
     
     @property
@@ -41,13 +41,33 @@ class FitsIO:
         Set the status of the image to either 'active' or 'skip'.
         
         Policy:
-        - This function will only change the status in the metadata, so it will load whatever array is already stored in the file and re-save it with updated metadata. So, no z-projection, channel selection or compression is applied here.
+        - This function will only change the status in the metadata, so it will load whatever array is already stored in the file and re-save it with updated metadata. So, no z-projection, channel labels, compression or provenance tag is applied here.
         - Multi-series inputs are not supported here by design.
         
         Args:
             status : New status to set ('active' or 'skip').
         """
         set_status(self.reader, status)
+    
+    @property
+    def channel_labels(self) -> list[str] | None:
+        """
+        Returns the channel labels from the metadata, or None if not available.
+        """
+        return self.reader.channel_labels
+    
+    def set_channel_labels(self, channel_labels: str | Sequence[str]) -> None:
+        """
+        Set the channel labels in the metadata.
+        
+        Policy:
+        - This function will only change the channel labels in the metadata, so it will load whatever array is already stored in the file and re-save it with updated metadata. So, no z-projection, change status, compression or provenance tag is applied here.
+        - Multi-series inputs are not supported here by design.
+        
+        Args:
+            channel_labels : New channel labels to set, either a single string for one channel or a sequence of strings for multiple channels.
+        """
+        set_channel_labels(self.reader, channel_labels)
     
     def get_array(self, z_projection: Zproj = None) -> NDArray | list[NDArray]:
         """

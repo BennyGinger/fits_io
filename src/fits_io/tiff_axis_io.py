@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -109,24 +108,3 @@ def read_tiff_channels(path: str | Path, channel: int | str | Sequence[int | str
         return out
     
     
-def apply_z_projection(arr: NDArray, z_axis: int | None, method: Literal['max', 'mean', None]) -> NDArray:
-    """
-    Return array after applying z-projection along specified axis, if any and method given. Else return original array.
-    Args:
-        arr: Input array.
-        z_axis: Axis index corresponding to Z dimension.
-        method: Projection method: 'max', 'mean', or None.
-    
-    Returns:
-        NDArray: Projected array or original array.
-    """
-    
-    if z_axis is None or method is None:
-        return arr
-    
-    if method == 'max':
-        return np.max(arr, axis=z_axis)
-    elif method == 'mean':
-        return np.mean(arr, axis=z_axis)
-    else:
-        raise ValueError(f"Unsupported z-projection method: {method}")

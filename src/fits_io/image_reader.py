@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Any, Literal, Mapping, Sequence, Type, cast
 import logging
 
-from fits_io.tiff_axis_io import apply_z_projection, read_tiff_channels
+from fits_io.tiff_axis_io import read_tiff_channels
 import nd2
 from nd2.structures import Channel, ExpLoop, ChannelMeta, Volume
-from tifffile import TiffFile, TiffPage, TiffWriter, imread, COMPRESSION, TiffTag
+from tifffile import TiffFile, TiffPage, imread, COMPRESSION, TiffTag
 from numpy.typing import NDArray
 import numpy as np
 
@@ -22,6 +22,7 @@ ALLOWED_FLAGS: set[StatusFlag] = {"active", "skip"}
 DEFAULT_FLAG: StatusFlag = "active"
 INFO_NAMESPACE = "fits_io"
 Zproj = Literal['max', 'mean', None]
+ArrAxis = Literal['P', 'C', 'Z', 'T', 'X', 'Y']
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ class ImageReader(ABC):
     """Abstract base class for image readers."""
 
     img_path: Path
+    _channel_labels: list[str] | None = field(default=None, kw_only=True)
     
     @classmethod
     @abstractmethod
@@ -103,7 +105,7 @@ class ImageReader(ABC):
         ...
     
     @abstractmethod
-    def axis_index(self, axis: Literal['P', 'C', 'Z', 'T', 'X', 'Y']) -> list[int | None]:
+    def axis_index(self, axis: ArrAxis) -> list[int | None]:
         """Return a list of indices of the specified axis, or None if not present, for each series."""
         ...
     
@@ -135,6 +137,28 @@ class ImageReader(ABC):
         """Return the selected channel(s) as a NumPy array or list of arrays. Channel can be specified by index or label."""
         ...
 
+    def apply_z_projection(self, arr: NDArray, z_axis: int | None, method: Zproj | None) -> NDArray:
+        """
+        Return array after applying z-projection along specified axis, if any and method given. Else return original array.
+        Args:
+            arr: Input array.
+            z_axis: Axis index corresponding to Z dimension.
+            method: Z-projection method to apply ('max', 'mean' or None).
+        Returns:
+            NDArray: Projected array or original array.
+        """
+        
+        
+        if z_axis is None or method is None:
+            return arr
+        
+        if method == 'max':
+            return np.max(arr, axis=z_axis)
+        elif method == 'mean':
+            return np.mean(arr, axis=z_axis)
+        else:
+            raise ValueError(f"Unsupported z-projection method: {method}")
+
 @dataclass(slots=True)
 class Nd2Reader(ImageReader):
     
@@ -157,7 +181,7 @@ class Nd2Reader(ImageReader):
     
     @property
     def axes(self) -> list[str]:
-        return [self._axes.replace('P', '')]  # Remove 'P' axis for series handling.
+        return [self._axes.replace('P', '')]
     
     @property
     def compression_method(self) -> str | None:
@@ -180,6 +204,9 @@ class Nd2Reader(ImageReader):
         if self._channels is None:
             return None
         
+        if self._channel_labels is not None:
+            return self._channel_labels
+        
         labels: list[str] = []
         for channel in self._channels:
             chan: ChannelMeta = channel.channel
@@ -190,7 +217,7 @@ class Nd2Reader(ImageReader):
     def series_number(self) -> int:
         return self._sizes.get('P', 1)
     
-    def axis_index(self, axis: Literal['P', 'C', 'Z', 'T', 'X', 'Y']) -> list[int | None]:
+    def axis_index(self, axis: ArrAxis) -> list[int | None]:
         if axis not in self._axes:
             return [None] * self.series_number
         return [self._axes.index(axis)] * self.series_number
@@ -235,15 +262,60 @@ class Nd2Reader(ImageReader):
         z_axis = self.axis_index('Z')[0]
         
         if p_axis is None:
-            return apply_z_projection(arr, z_axis=z_axis, method=z_projection)
+            return self.apply_z_projection(arr, z_axis=z_axis, method=z_projection)
 
         series_lst = np.split(arr, arr.shape[p_axis], axis=p_axis)
         arr_lst = [s.squeeze(axis=p_axis) for s in series_lst]
-        return [apply_z_projection(a, z_axis=z_axis, method=z_projection) for a in arr_lst]
+        return [self.apply_z_projection(a, z_axis=z_axis, method=z_projection) for a in arr_lst]
+    
+    def _normalize_channels(self, channel: int | str | Sequence[int | str]) -> list[int]:
+        req = [channel] if isinstance(channel, (int, str)) else list(channel)
+
+        # determine n_channels
+        n_channels = self.channel_number[0] if isinstance(self.channel_number, list) else self.channel_number
+
+        out: list[int] = []
+        for item in req:
+            if isinstance(item, int):
+                if not (0 <= item < n_channels):
+                    raise IndexError(f"Channel index {item} out of range [0, {n_channels})")
+                out.append(item)
+            else:
+                labels = self._channel_labels
+                if labels is None:
+                    raise ValueError(
+                        f"Channel {item!r} requested but {type(self).__name__} has no channel_labels; "
+                        "use integer indices or provide channel_labels."
+                    )
+                try:
+                    out.append(labels.index(item))
+                except ValueError:
+                    raise ValueError(f"Unknown channel label {item!r}. Known: {labels}") from None
+        return out
     
     def get_channel(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> NDArray | list[NDArray]:
-        logger.warning("Reading channel(s) from .nd2 file is not yet implemented")
-        return np.array([])
+        # Get the different indexes and axes
+        z_axis = self.axis_index('Z')[0]
+        c_axis = self.axis_index('C')[0]
+        p_axis = self.axis_index('P')[0]
+        idxs = self._normalize_channels(channel)
+        chan_idxs = idxs[0] if len(idxs) == 1 else idxs  # single int if only one channel requested, else list of ints
+        
+        # get dask array for lazy loading and channel selection
+        darr = nd2.imread(self.img_path, dask=True)
+        
+        # Create the slicer
+        slicer = [slice(None)] * darr.ndim
+        slicer[c_axis] = chan_idxs
+        
+        chan_arr = darr[tuple(slicer)].compute()
+        
+        if p_axis is None:
+            return self.apply_z_projection(chan_arr, z_axis=z_axis, method=z_projection)
+        
+        series_lst = np.split(chan_arr, chan_arr.shape[p_axis], axis=p_axis)
+        arr_lst = [s.squeeze(axis=p_axis) for s in series_lst]
+        return [self.apply_z_projection(a, z_axis=z_axis, method=z_projection) for a in arr_lst]
     
 @dataclass
 class TiffReader(ImageReader):
@@ -366,6 +438,9 @@ class TiffReader(ImageReader):
     
     @property
     def channel_labels(self) -> list[str] | None:
+        if self._channel_labels is not None:
+            return self._channel_labels
+        
         labels = self._imageJ_meta.get('Labels', None)
         if isinstance(labels, list) and all(isinstance(lbl, str) for lbl in labels):
             return labels
@@ -375,7 +450,7 @@ class TiffReader(ImageReader):
     def series_number(self) -> int:
         return self._series_count
     
-    def axis_index(self, axis: Literal['P', 'C', 'Z', 'T', 'X', 'Y']) -> list[int | None]:
+    def axis_index(self, axis: ArrAxis) -> list[int | None]:
         out: list[int | None] = []
         for ax in self._axes:
             if axis not in ax:
@@ -402,14 +477,14 @@ class TiffReader(ImageReader):
         if self.series_number == 1:
             z_axis = self.axis_index('Z')[0]
             arr = imread(self.img_path)
-            return apply_z_projection(arr, z_axis=z_axis, method=z_projection)
+            return self.apply_z_projection(arr, z_axis=z_axis, method=z_projection)
         
         with TiffFile(self.img_path) as tif:
             out: list[NDArray] = []
             for i, s in enumerate(tif.series):
                 arr = s.asarray()
                 z_axis = self.axis_index('Z')[i]
-                z_arr = apply_z_projection(arr, z_axis=z_axis, method=z_projection)
+                z_arr = self.apply_z_projection(arr, z_axis=z_axis, method=z_projection)
                 out.append(z_arr)
         return out
 
@@ -421,7 +496,7 @@ class TiffReader(ImageReader):
                 channel,
                 channel_labels=self.channel_labels,
                 series_index=0,)
-            return apply_z_projection(chan_arr, z_axis=z_axis, method=z_projection)
+            return self.apply_z_projection(chan_arr, z_axis=z_axis, method=z_projection)
         
         chan_arr_lst = [read_tiff_channels(
                 self.img_path,
@@ -432,7 +507,7 @@ class TiffReader(ImageReader):
         
         for i, arr in enumerate(chan_arr_lst):
             z_axis = self.axis_index('Z')[i]
-            chan_arr_lst[i] = apply_z_projection(arr, z_axis=z_axis, method=z_projection)
+            chan_arr_lst[i] = self.apply_z_projection(arr, z_axis=z_axis, method=z_projection)
         return chan_arr_lst
     
 class ImageReaderError(Exception):
@@ -453,7 +528,7 @@ READER_BY_SUFFIX: dict[str, Type[ImageReader]] = {
     ".nd2": Nd2Reader,
 }
 
-def get_reader(path: str | Path) -> ImageReader:
+def get_reader(path: str | Path, channel_labels: list[str] | None = None) -> ImageReader:
     """Return an ImageReader instance for the given path, based on suffix."""
     p = Path(path)
     
@@ -470,25 +545,49 @@ def get_reader(path: str | Path) -> ImageReader:
             f"Unsupported file type: {suffix!r}. Supported: {supported}"
         ) from e
 
-    return reader_cls(p)
+    return reader_cls(p, _channel_labels=channel_labels)
 
 
 
 if __name__ == "__main__":
     
-    tif_path1 = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run2/c2z25t23v1_tif.tif')
-    stack1 = imread(tif_path1)
-    print(stack1.shape)
-    tif_path2 = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run4/c4z1t91v1.tif')
-    stack2 = imread(tif_path2)
-    print(stack2.shape)
+    # tif_path1 = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run2/c2z25t23v1_tif.tif')
+    # stack1 = imread(tif_path1)
+    # print(stack1.shape)
+    # tif_path2 = Path('/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run4/c4z1t91v1.tif')
+    # stack2 = imread(tif_path2)
+    # print(stack2.shape)
     
-    with TiffWriter('/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run2/test.tif') as tif:
-        tif.write(stack1, metadata={'axes':'TZCYX'}, compression=None)
-        tif.write(stack2, metadata={'axes':'TCYX'}, compression='lzw', photometric="minisblack", planarconfig="separate")
+    # with TiffWriter('/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run2/test.tif') as tif:
+    #     tif.write(stack1, metadata={'axes':'TZCYX'}, compression=None)
+    #     tif.write(stack2, metadata={'axes':'TCYX'}, compression='lzw', photometric="minisblack", planarconfig="separate")
     
-    with TiffFile("/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run2/test.tif") as tif:
-        print("n_series:", len(tif.series))
-        for i, s in enumerate(tif.series):
-            print(i, "axes:", s.axes, "shape:", s.shape, "n_pages:", len(s.pages))
+    # with TiffFile("/media/ben/Analysis/Python/Docker_mount/Test_images/tiff/Run2/test.tif") as tif:
+    #     print("n_series:", len(tif.series))
+    #     for i, s in enumerate(tif.series):
+    #         print(i, "axes:", s.axes, "shape:", s.shape, "n_pages:", len(s.pages))
+    
+    with nd2.ND2File("/media/ben/Analysis/Python/Docker_mount/Test_images/nd2/Run2_test/control/c2z25t23v1_nd2.nd2") as f:
+        darr = f.to_dask()
+        print(type(darr))
+        print(darr.shape)
+        
+        print(f.sizes)
+        axes = tuple(f.sizes.keys())
+        print(axes)
+        c_axis = axes.index('C')
+        print("c_axis:", c_axis)
+        
+        ch_idx = [0]
+        
+        slicer = [slice(None)] * darr.ndim
+        slicer[c_axis] = ch_idx
+        
+        chan_arr = np.squeeze(darr[tuple(slicer)].compute())
+        print(type(chan_arr), chan_arr.shape)
+        
+
+        # example: take channel 0
+        # (axis order depends on the file)
+        
     

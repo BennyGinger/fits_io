@@ -2,12 +2,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 import json
+import logging
 
 from numpy.typing import NDArray
 import numpy as np
 
 from fits_io.provenance import FITS_TAG, add_provenance_profile
-from fits_io.image_reader import ImageReader, StatusFlag, InfoProfile
+from fits_io.image_reader import ImageReader, StatusFlag, InfoProfile, Zproj
 from fits_io._types import ExtraTags, PixelSize, PixelDensity
 
 COLOR_MAP = {
@@ -51,6 +52,8 @@ LABEL_TO_COLOR = {
 
 DEFAULT_STEP_NAME = 'unknown_step_1'
 DEFAULT_DISTRIBUTION = 'unknown_distribution'
+
+logger = logging.getLogger(__name__)
 
 class StackMeta:
     
@@ -171,19 +174,23 @@ def _encode_metadata(payload: Mapping[str, Any]) -> ExtraTags | None:
         return [(FITS_TAG, "B", len(raw), raw, True)]
     return None
 
-def _update_metadata(original_meta: Mapping[str, Any], *, update_meta: Mapping[str, Any] | None, step_name: str) -> dict[str, Any]:
+def _update_metadata(original_meta: Mapping[str, Any], *, update_meta: Mapping[str, Any] | None, step_name: str, z_projection: Zproj) -> dict[str, Any]:
     """
     Update original metadata dictionary with values from update_meta.
     """
     out = dict(original_meta)
+    meta = dict(update_meta) if update_meta else {}
     
-    if update_meta is None:
+    if not meta:
         return out
     
+    if z_projection is not None:
+        meta['z_projection_method'] = z_projection
+    
     if step_name in out:
-        out[step_name].update(update_meta)
+        out[step_name].update(meta)
     else:
-        out[step_name] = dict(update_meta)
+        out[step_name] = meta
     return out
 
 def _get_step_name(original_meta: Mapping[str, Any], *, step_name: str | None) -> str:
@@ -207,7 +214,19 @@ def _get_step_name(original_meta: Mapping[str, Any], *, step_name: str | None) -
     
     return step
 
-def build_imagej_metadata(img_reader: ImageReader, *, user_name: str, distribution: str | None = None, step_name: str | None = None, channel_labels: str | Sequence[str] | None = None, extra_step_metadata: Mapping[str, Any] | None = None, new_status: StatusFlag | None = None, series_index: int = 0) -> TiffMetadata:
+def _normalize_channel_labels(labels: str | Sequence[str] | None, n_channels: int) -> list[str] | None:
+    if labels is None:
+        return None
+    if isinstance(labels, str):
+        if n_channels != 1:
+            raise ValueError(f"Expected {n_channels} channel labels, got a single string.")
+        return [labels]
+    labels_list = list(labels)
+    if len(labels_list) != n_channels:
+        raise ValueError(f"Expected {n_channels} channel labels, got {len(labels_list)}.")
+    return labels_list
+
+def build_imagej_metadata(img_reader: ImageReader, *, user_name: str, distribution: str | None = None, step_name: str | None = None, channel_labels: str | Sequence[str] | None = None, z_projection: Zproj = None, extra_step_metadata: Mapping[str, Any] | None = None, add_provenance: bool = True, new_status: StatusFlag | None = None, series_index: int = 0) -> TiffMetadata:
     """
     Build ImageJ-compatible metadata for saving TIFF files.
     
@@ -217,35 +236,54 @@ def build_imagej_metadata(img_reader: ImageReader, *, user_name: str, distributi
         distribution: Optional; name of the distribution or package.
         step_name: Optional; name of the processing step.
         channel_labels: Optional; either a single string label or a sequence of labels for each channel. If None, default labels will be used.
+        z_projection: Optional; method of z-projection applied to the image data.
         extra_step_metadata: Optional mapping of additional metadata to include in the processing step.
+        add_provenance: Optional; if True, add provenance information to the metadata.
         new_status: Optional; if provided, overrides the status in the metadata.
         series_index: Optional; index of the series to use for multi-series images, purely to save appropriate metadata.
     
     Returns:
         TiffMetadata object containing metadata, resolution, and extra tags.
     """
+    # Determine channel labels and number of channels for metadata
+    if channel_labels is None:
+        # exporting all channels
+        chosen_labels = img_reader.channel_labels
+        n_channels = img_reader.channel_number[series_index]
+    else:
+        if isinstance(channel_labels, str):
+            n_channels = 1
+        else:
+            n_channels = len(list(channel_labels))
+
+    chosen_labels = _normalize_channel_labels(channel_labels, n_channels)
     
-    input_channel_labels = img_reader.channel_labels
-    if channel_labels is not None:
-        input_channel_labels = channel_labels
+    # Determine axes string for metadata, adjusting for z-projection and channel export
+    axes = img_reader.axes[series_index]
+    if z_projection is not None:
+        axes = axes.replace('Z', '')  # drop Z axis if z-projection is applied
+    if n_channels == 1:
+        axes = axes.replace('C', '')  # drop C axis for single channel export
+    logger.debug(f"Building metadata with axes: {axes}, channel_labels: {chosen_labels}, z_projection: {z_projection}") 
     
     # extract metadata components
-    channel_meta = ChannelMeta(channel_number=img_reader.channel_number[series_index], labels=input_channel_labels)
+    channel_meta = ChannelMeta(channel_number=n_channels, labels=chosen_labels)
     resolution_meta = ResolutionMeta(img_reader.resolution[series_index])
-    stack_meta = StackMeta(axes=img_reader.axes[series_index], 
+    stack_meta = StackMeta(axes=axes, 
                            status=img_reader.status,
                            user_name=user_name,
                            finterval=img_reader.interval)
     
     # build custom metadata to be stored in private tag
-    payload = img_reader.custom_metadata
+    payload = dict(img_reader.custom_metadata)
     
-    if new_status is None: # Add new processing step to provenance
+    if add_provenance:
         dist = distribution or DEFAULT_DISTRIBUTION
         step = _get_step_name(payload, step_name=step_name)
         payload = add_provenance_profile(payload, distribution=dist, step_name=step)
-        payload = _update_metadata(payload, update_meta=extra_step_metadata, step_name=step)
-    else: # Skip the provenance addition, just change status
+        payload = _update_metadata(payload, update_meta=extra_step_metadata, step_name=step, z_projection=z_projection)
+    
+    if new_status is not None:
         stack_meta.change_status(new_status)
     
     extratags = _encode_metadata(payload)

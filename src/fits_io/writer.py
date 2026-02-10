@@ -20,6 +20,10 @@ DEFAULT_OUTPUT_NAME = 'fits.tif'
 def _save_tiff(img_array: NDArray, save_path: Path, metadata: TiffMetadata, compression: str | None = 'zlib') -> None:
     
     predictor = 2 if compression in {"zlib", "deflate", "lzma"} else None
+    logger.debug(f"_save_tiff: compression={compression} predictor={predictor} dtype={img_array.dtype} shape={img_array.shape} size={img_array.size}")
+    
+    if img_array.size == 0:
+        raise ValueError("Cannot save empty array to TIFF. The input array has zero elements.")
     
     imwrite(save_path,
             img_array,
@@ -31,39 +35,44 @@ def _save_tiff(img_array: NDArray, save_path: Path, metadata: TiffMetadata, comp
             compression=compression,
     )
 
-def _get_array_to_export(img_reader: ImageReader, channel_labels: str | Sequence[str], export_channels: str | Sequence[str], z_projection: Zproj = None) -> tuple[list[NDArray], list[str]]:
-    # Make sure channel_labels is a list
-    if isinstance(channel_labels, str):
-        channel_labels = [channel_labels]
-    else:
-        channel_labels = list(channel_labels)
+def _get_array_to_export(img_reader: ImageReader, channel_labels: str | Sequence[str], export_channels: str | Sequence[str], z_projection: Zproj = None) -> tuple[list[NDArray], str | list[str]]:
     
-    # Determine which channels to export
-    if isinstance(export_channels, str) and export_channels.lower() in {'all', 'initialize'}:
-        use_all_channels = True
-        selected_channels = channel_labels
+    logger.debug(f"{channel_labels=}, {export_channels=}, {z_projection=}")
+    # --- normalize channel_labels once (but preserve sentinel) ---
+    if isinstance(channel_labels, str):
+        if channel_labels.lower() == "initialize":
+            arrays = img_reader.get_array(z_projection)
+            arrays_list = [arrays] if isinstance(arrays, np.ndarray) else list(arrays)
+            if any(a.size == 0 for a in arrays_list):
+                raise ValueError("Reader returned empty arrays; cannot export.")
+            return arrays_list, "initialize"
+        labels = [channel_labels]
+    else:
+        labels = list(channel_labels)
+
+    # --- decide what to export ---
+    if isinstance(export_channels, str) and export_channels.lower() == "all":
+        selected = labels
+        arrays = img_reader.get_array(z_projection)
     else:
         requested = [export_channels] if isinstance(export_channels, str) else list(export_channels)
-        
-        if any(chan not in channel_labels for chan in requested):
-            logger.warning(f"All exported channels {requested} should be in channel labels {channel_labels}.")
-            use_all_channels = True
-            selected_channels = channel_labels
-        else:
-            use_all_channels = False
-            selected_channels = requested
-    
-    # Get the array(s)
-    arrays = (
-        img_reader.get_array(z_projection)
-        if use_all_channels
-        else img_reader.get_channel(selected_channels, z_projection)
-    )
 
-    # Normalize to list[NDArray]
-    arrays = [arrays] if isinstance(arrays, np.ndarray) else list(arrays)
-    
-    return arrays, selected_channels
+        if any(ch not in labels for ch in requested):
+            logger.warning(
+                "Requested export channels %s should be in channel labels %s; falling back to all.",
+                requested,
+                labels,
+            )
+            selected = labels
+            arrays = img_reader.get_array(z_projection)
+        else:
+            selected = requested
+            arrays = img_reader.get_channel(selected, z_projection)
+
+    arrays_list = [arrays] if isinstance(arrays, np.ndarray) else list(arrays)
+    if any(a.size == 0 for a in arrays_list):
+        raise ValueError("Export produced empty arrays (likely unsupported channel extraction or reader bug).")
+    return arrays_list, selected
 
 def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', distribution: str | None = None, step_name: str | None = None, output_name: str = DEFAULT_OUTPUT_NAME, channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib', overwrite: bool = False) -> list[Path]:
     """
@@ -101,7 +110,8 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
     
     # Get the image array(s)
     arrays, used_channels = _get_array_to_export(img_reader, 
-                                                channel_labels=channel_labels, export_channels=export_channels, 
+                                                channel_labels=channel_labels, 
+                                                export_channels=export_channels, 
                                                 z_projection=z_projection)
     
     # Prepare metadata
@@ -111,6 +121,7 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
                         distribution=distribution,
                         step_name=step_name,
                         channel_labels=used_channels,
+                        z_projection=z_projection,
                         extra_step_metadata=user_defined_metadata)
     
     # Write FITS TIFF with metadata and reader
@@ -158,7 +169,7 @@ def set_status(img_reader: ImageReader, status: StatusFlag, user_name: str = 'un
     Set the status of the image to either 'active' or 'skip'.
     
     Policy:
-    - This function will only change the status in the metadata, so it will load whatever array is already stored in the file and re-save it with updated metadata. So, no z-projection, channel selection or compression is applied here.
+    - This function will only change the status in the metadata, so it will load whatever array is already stored in the file and re-save it with updated metadata. So, no z-projection, channel labels, compression or provenance tag is applied here.
     
     Args:
         img_reader : An ImageReader instance for the input image.
@@ -173,6 +184,7 @@ def set_status(img_reader: ImageReader, status: StatusFlag, user_name: str = 'un
     
     meta = build_imagej_metadata(img_reader,
                                  user_name=user_name,
+                                 add_provenance=False, # do not add provenance for status change
                                  new_status=status)
     
     array = img_reader.get_array()
@@ -183,7 +195,39 @@ def set_status(img_reader: ImageReader, status: StatusFlag, user_name: str = 'un
         raise ValueError("Expected a single array, but got multiple series. You may need to use convert_to_fits_tif instead.")
     
     _save_tiff(array, img_reader.img_path, meta, compression=compression)
-        
+
+def set_channel_labels(img_reader: ImageReader, channel_labels: str | Sequence[str], user_name: str = 'unknown') -> None:
+    """
+    Set the channel labels in the metadata.
+    
+    Policy:
+    - This function will only change the channel labels in the metadata, so it will load whatever array is already stored in the file and re-save it with updated metadata. So, no z-projection, change status, compression or provenance tag is applied here.
+    - Multi-series inputs are not supported here by design.
+    
+    Args:
+        img_reader : An ImageReader instance for the input image.
+        channel_labels : New channel labels to set, either a single string for one channel or a sequence of strings for multiple channels.
+        user_name : Name of the user setting the channel labels, by default 'unknown'
+    """
+    if not isinstance(img_reader, TiffReader):
+        raise TypeError("set_channel_labels only supports .tif/.tiff files.")
+    
+    # Get existing metadata to preserve other fields
+    meta = build_imagej_metadata(img_reader,
+                                 user_name=user_name,
+                                 channel_labels=channel_labels,
+                                 add_provenance=False) # do not add provenance for metadata update
+    
+    array = img_reader.get_array()
+    
+    compression = img_reader.compression_method
+    
+    if isinstance(array, list):
+        raise ValueError("Expected a single array, but got multiple series. You may need to use convert_to_fits_tif instead.")
+    
+    _save_tiff(array, img_reader.img_path, meta, compression=compression)  
+
+
 
 if __name__ == '__main__':
     from time import time
