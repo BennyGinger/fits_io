@@ -127,15 +127,14 @@ class ChannelMeta:
     luts: list[NDArray[np.uint8]] | None = field(init=False)
     
     def __post_init__(self):
-        if self.labels is None or self.labels == 'initialize':
+        if self.labels is None:
             self.mode, self.luts = 'grayscale', None
-            self.labels = self.init_labels()
             return
         
         if isinstance(self.labels, str):
             self.labels = [self.labels]
         
-        if self.labels is not None and len(self.labels) != self.channel_number:
+        if len(self.labels) != self.channel_number:
             raise ValueError(f"Expected {self.channel_number} labels, got {len(self.labels)}")
         
         colors = [LABEL_TO_COLOR.get(lbl.lower(), None) for lbl in self.labels]
@@ -144,9 +143,6 @@ class ChannelMeta:
         else:
             self.mode, self.luts = 'color', [make_color_lut(c) for c in colors if c is not None]
     
-    def init_labels(self) -> list[str]:
-        return [f"C{i+1}" for i in range(self.channel_number)]
-         
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any]=  {}
         d['Labels'] = self.labels
@@ -245,6 +241,9 @@ def build_imagej_metadata(img_reader: ImageReader, *, user_name: str, distributi
     Returns:
         TiffMetadata object containing metadata, resolution, and extra tags.
     """
+    
+    
+    
     # Determine channel labels and number of channels for metadata
     if channel_labels is None:
         # exporting all channels

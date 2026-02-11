@@ -56,12 +56,42 @@ class ImageReader(ABC):
     img_path: Path
     _channel_labels: list[str] | None = field(default=None, kw_only=True)
     
+    def _validate_channel_label_override(self) -> None:
+        if self._channel_labels is None:
+            return
+
+        counts = self.channel_number
+        unique = sorted(set(counts))
+        if len(unique) != 1:
+            raise ValueError(
+                "Cannot use a single global channel_labels override because this file has "
+                f"different channel counts per series: {counts}. "
+                "Either omit channel_labels or provide per-series labels (not supported yet)."
+            )
+
+        n = unique[0]
+        if len(self._channel_labels) != n:
+            raise ValueError(
+                f"Length of provided channel_labels ({len(self._channel_labels)}) does not "
+                f"match number of channels in image ({n})."
+            )
+    
     @classmethod
     @abstractmethod
     def can_read(cls, path: Path) -> bool:
         """Return True if this reader supports the file."""
         ...
 
+    @property
+    def channel_labels(self) -> list[str] | None:
+        """User override if provided, otherwise subclass may return its own labels."""
+        return self._channel_labels if self._channel_labels is not None else self._native_channel_labels()
+
+    @abstractmethod
+    def _native_channel_labels(self) -> list[str] | None:
+        """Subclasses return labels from file (or None if unavailable)."""
+        ...
+    
     @property
     @abstractmethod
     def axes(self) -> list[str]:
@@ -92,11 +122,6 @@ class ImageReader(ABC):
         """Return the number of channels in the image for each series, or 1 if not applicable."""
         ...
     
-    @property
-    @abstractmethod
-    def channel_labels(self) -> list[str] | None:
-        """Return the list of channel labels, or None if not available."""
-        ...
     
     @property
     @abstractmethod
@@ -178,6 +203,10 @@ class Nd2Reader(ImageReader):
             meta = file.metadata
             self._channels = getattr(meta, 'channels', None)
             self._exploop = file.experiment
+        
+        self._validate_channel_label_override()
+        if self._channel_labels is None:
+            logger.info("Nd2Reader: channel_labels not provided; label-based selection will be disabled.")
     
     @property
     def axes(self) -> list[str]:
@@ -197,15 +226,13 @@ class Nd2Reader(ImageReader):
     
     @property
     def channel_number(self) -> list[int]:
-        return [self._sizes.get('C', 1)]
+        n_series = self.series_number
+        n_channels = self._sizes.get("C", 1)
+        return [n_channels] * n_series
     
-    @property
-    def channel_labels(self) -> list[str] | None:
+    def _native_channel_labels(self) -> list[str] | None:
         if self._channels is None:
             return None
-        
-        if self._channel_labels is not None:
-            return self._channel_labels
         
         labels: list[str] = []
         for channel in self._channels:
@@ -272,7 +299,7 @@ class Nd2Reader(ImageReader):
         req = [channel] if isinstance(channel, (int, str)) else list(channel)
 
         # determine n_channels
-        n_channels = self.channel_number[0] if isinstance(self.channel_number, list) else self.channel_number
+        n_channels = self.channel_number[0]
 
         out: list[int] = []
         for item in req:
@@ -284,9 +311,10 @@ class Nd2Reader(ImageReader):
                 labels = self._channel_labels
                 if labels is None:
                     raise ValueError(
-                        f"Channel {item!r} requested but {type(self).__name__} has no channel_labels; "
-                        "use integer indices or provide channel_labels."
-                    )
+                        f"Channel {item!r} requested by label, but {type(self).__name__} "
+                "does not support native channel labels. Provide channel_labels in get_reader(...), "
+                "or use integer channel indices."
+            )
                 try:
                     out.append(labels.index(item))
                 except ValueError:
@@ -354,6 +382,7 @@ class TiffReader(ImageReader):
             self._custom_metadata = self._get_custom_metadata_from_tags(meta)
             
         self._status = self._get_status_from_metadata()
+        self._validate_channel_label_override()
     
     def _get_compression_from_tags(self, tiff_page: TiffPage) -> str | None:
         comp = COMPRESSION(tiff_page.tags["Compression"].value)
@@ -436,11 +465,7 @@ class TiffReader(ImageReader):
                 out.append(1)
         return out
     
-    @property
-    def channel_labels(self) -> list[str] | None:
-        if self._channel_labels is not None:
-            return self._channel_labels
-        
+    def _native_channel_labels(self) -> list[str] | None:
         labels = self._imageJ_meta.get('Labels', None)
         if isinstance(labels, list) and all(isinstance(lbl, str) for lbl in labels):
             return labels

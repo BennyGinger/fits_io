@@ -4,13 +4,13 @@ import logging
 from functools import partial
 
 from numpy.typing import NDArray
-import numpy as np
 from tifffile import imwrite
 
-from fits_io.provenance import image_converted, is_processed, get_timestamp
+from fits_io.provenance import image_converted
 from fits_io.image_reader import ImageReader, TiffReader, StatusFlag, ALLOWED_FLAGS, Zproj
 from fits_io.metadata import build_imagej_metadata, TiffMetadata
 from fits_io.filesystem import get_save_dirs, build_output_path, mkdirs_paths
+from fits_io.conversion import resolve_channel_labels, get_array_to_export
 
 
 logger = logging.getLogger(__name__)
@@ -35,45 +35,6 @@ def _save_tiff(img_array: NDArray, save_path: Path, metadata: TiffMetadata, comp
             compression=compression,
     )
 
-def _get_array_to_export(img_reader: ImageReader, channel_labels: str | Sequence[str], export_channels: str | Sequence[str], z_projection: Zproj = None) -> tuple[list[NDArray], str | list[str]]:
-    
-    logger.debug(f"{channel_labels=}, {export_channels=}, {z_projection=}")
-    # --- normalize channel_labels once (but preserve sentinel) ---
-    if isinstance(channel_labels, str):
-        if channel_labels.lower() == "initialize":
-            arrays = img_reader.get_array(z_projection)
-            arrays_list = [arrays] if isinstance(arrays, np.ndarray) else list(arrays)
-            if any(a.size == 0 for a in arrays_list):
-                raise ValueError("Reader returned empty arrays; cannot export.")
-            return arrays_list, "initialize"
-        labels = [channel_labels]
-    else:
-        labels = list(channel_labels)
-
-    # --- decide what to export ---
-    if isinstance(export_channels, str) and export_channels.lower() == "all":
-        selected = labels
-        arrays = img_reader.get_array(z_projection)
-    else:
-        requested = [export_channels] if isinstance(export_channels, str) else list(export_channels)
-
-        if any(ch not in labels for ch in requested):
-            logger.warning(
-                "Requested export channels %s should be in channel labels %s; falling back to all.",
-                requested,
-                labels,
-            )
-            selected = labels
-            arrays = img_reader.get_array(z_projection)
-        else:
-            selected = requested
-            arrays = img_reader.get_channel(selected, z_projection)
-
-    arrays_list = [arrays] if isinstance(arrays, np.ndarray) else list(arrays)
-    if any(a.size == 0 for a in arrays_list):
-        raise ValueError("Export produced empty arrays (likely unsupported channel extraction or reader bug).")
-    return arrays_list, selected
-
 def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', distribution: str | None = None, step_name: str | None = None, output_name: str = DEFAULT_OUTPUT_NAME, channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib', overwrite: bool = False) -> list[Path]:
     """
     Convert an image file to a FITS TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
@@ -83,8 +44,8 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
         distribution : Name of the distribution or package, by default None
         step_name : Name of the processing step, by default None
         output_name : Optional name of the output TIFF file.
-        channel_labels : Channel labels to include in the metadata. If None, uses labels from the input file, by default None
-        export_channels : Channels to export. Can be 'all' or a list of channel labels, by default 'all'
+        channel_labels : Optional labels for source channels (used for mapping), if None, default labels will be used. 
+        export_channels : Subset channels to export. Can be 'all' or a list of channel labels, by default 'all'
         user_defined_metadata : Additional custom metadata to include in the TIFF file, by default None
         z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
         compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'
@@ -105,14 +66,10 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
     save_path_lst = [build_output_path(save_dir, save_name=output_name) for save_dir in save_dirs]
     
     # Set default channel labels to be initialized if user did not provide any
-    if channel_labels is None:
-        channel_labels = 'initialize'
+    used_channels, export_all_flag = resolve_channel_labels(channel_labels, img_reader.channel_number[0], export_channels)
     
     # Get the image array(s)
-    arrays, used_channels = _get_array_to_export(img_reader, 
-                                                channel_labels=channel_labels, 
-                                                export_channels=export_channels, 
-                                                z_projection=z_projection)
+    arrays = get_array_to_export(img_reader, used_channels, export_all_flag, z_projection)
     
     # Prepare metadata
     build_md = partial(build_imagej_metadata,
