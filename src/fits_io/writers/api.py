@@ -128,7 +128,7 @@ def set_status(img_reader: ImageReader, status: StatusFlag, user_name: str = 'un
     
     meta = build_metadata(img_reader,
                                  user_name=user_name,
-                                 add_provenance=False, # do not add provenance for status change
+                                 add_step_meta=False, # do not add step metadata for status change
                                  new_status=status)
     
     array = img_reader.get_array()
@@ -160,7 +160,7 @@ def set_channel_labels(img_reader: ImageReader, channel_labels: str | Sequence[s
     meta = build_metadata(img_reader,
                                  user_name=user_name,
                                  channel_labels=channel_labels,
-                                 add_provenance=False) # do not add provenance for metadata update
+                                 add_step_meta=False) # do not add step metadata for metadata update
     
     array = img_reader.get_array()
     

@@ -1,6 +1,6 @@
 [project]
 name = "fits-io"
-version = "0.6.0"
+version = "0.7.0"
 description = "Module to read and write microscopy image files and convert them to FITS-TIFF format."
 readme = "README.md"
 authors = [

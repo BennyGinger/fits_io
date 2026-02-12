@@ -12,8 +12,8 @@ def _get_dist_version(dist_name: str) -> str:
     except PackageNotFoundError:
         return "unknown"
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 def add_provenance_profile(custom_metadata: Mapping[str, Any], *, distribution: str, step_name: str) -> dict[str, Any]:
     """
@@ -32,7 +32,7 @@ def add_provenance_profile(custom_metadata: Mapping[str, Any], *, distribution: 
     out[step_name] = {
         "dist": distribution,
         "version": _get_dist_version(distribution),
-        "timestamp": _utc_now_iso(),
+        "timestamp": _utc_now(),
         }
     return out
 

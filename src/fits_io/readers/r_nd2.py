@@ -10,7 +10,6 @@ from numpy.typing import NDArray
 
 from fits_io.readers.protocol import DEFAULT_FLAG, ImageReader
 from fits_io.readers._types import PixelSize, StatusFlag, Zproj, ArrAxis
-from fits_io.readers.info import InfoProfile
 
 
 logger = logging.getLogger(__name__)
@@ -49,11 +48,7 @@ class Nd2Reader(ImageReader):
     
     @property
     def status(self) -> StatusFlag:
-        return 'active'  # nd2 files do not have status info; default to 'active'
-    
-    @property
-    def export_status(self,) -> str:
-        return InfoProfile(status=DEFAULT_FLAG).export
+        return DEFAULT_FLAG  # nd2 files do not have status info; default to 'active'
     
     @property
     def channel_number(self) -> list[int]:
@@ -111,7 +106,7 @@ class Nd2Reader(ImageReader):
     
     @property
     def custom_metadata(self) -> Mapping[str, Any]:
-        logger.info(".nd2 file do not have custom metadata saved")
+        logger.warning(".nd2 file do not have custom metadata saved")
         return {}
     
     def get_array(self, z_projection: Zproj = None) -> NDArray | list[NDArray]:

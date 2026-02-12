@@ -74,16 +74,9 @@ class ImageReader(ABC):
     
     @property
     @abstractmethod
-    def export_status(self,) -> str:
-        """Return the export status string for the image."""
-        ...
-    
-    @property
-    @abstractmethod
     def channel_number(self) -> list[int]:
         """Return the number of channels in the image for each series, or 1 if not applicable."""
         ...
-    
     
     @property
     @abstractmethod

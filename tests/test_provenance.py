@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fits_io.metadata.provenance import _get_dist_version, get_timestamp, _is_processed, add_provenance_profile, _utc_now_iso
+from fits_io.metadata.provenance import _get_dist_version, get_timestamp, _is_processed, add_provenance_profile, _utc_now
 
 
 # Tests for get_dist_version
@@ -24,7 +24,7 @@ def test_get_dist_version_returns_unknown_for_nonexistent_package():
 # Tests for utc_now_iso
 def test_utc_now_iso_returns_iso_format_string():
     """Should return ISO format timestamp string."""
-    timestamp = _utc_now_iso()
+    timestamp = _utc_now()
     
     assert isinstance(timestamp, str)
     # Should be parseable as ISO format
@@ -34,7 +34,7 @@ def test_utc_now_iso_returns_iso_format_string():
 
 def test_utc_now_iso_is_utc_timezone():
     """Should return timestamp in UTC timezone."""
-    timestamp = _utc_now_iso()
+    timestamp = _utc_now()
     parsed = datetime.fromisoformat(timestamp)
     
     # Check it's close to current UTC time (within 1 second)

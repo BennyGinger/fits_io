@@ -1,8 +1,9 @@
 import json
 from typing import Mapping, Sequence, Any
 
-from fits_io.readers._types import ExtraTags, Zproj
+from fits_io.readers._types import ExtraTags, StatusFlag, Zproj
 from fits_io.metadata.provenance import FITS_TAG
+from fits_io.readers.protocol import ALLOWED_FLAGS, DEFAULT_FLAG
 
 
 DEFAULT_STEP_NAME = 'unknown_step_1'
@@ -20,25 +21,27 @@ def encode_metadata(payload: Mapping[str, Any]) -> ExtraTags | None:
         return [(FITS_TAG, "B", len(raw), raw, True)]
     return None
 
-def update_metadata(original_meta: Mapping[str, Any], *, update_meta: Mapping[str, Any] | None, step_name: str, z_projection: Zproj) -> dict[str, Any]:
+def update_metadata(original_meta: Mapping[str, Any], *, update_meta: Mapping[str, Any] | None, step_name: str, z_projection: Zproj, status: StatusFlag) -> dict[str, Any]:
     """
     Update original metadata dictionary with values from update_meta.
     Args:
         original_meta: The original metadata dictionary to update. 
         update_meta: A dictionary of metadata to merge into the original. 
         step_name: The name of the processing step, used as a key for organizing metadata. 
-        z_projection: The method of z-projection applied, which may be added to the metadata. Returns: A new dictionary containing the merged metadata.
+        z_projection: The method of z-projection applied, which may be added to the metadata. 
+
     Returns:
         A new dictionary containing the merged metadata.
     """
     out = dict(original_meta)
     meta = dict(update_meta) if update_meta else {}
     
+    # Add status and projection
+    out['status'] = status
+    out['z_projection_method'] = z_projection
+    
     if not meta:
         return out
-    
-    if z_projection is not None:
-        meta['z_projection_method'] = z_projection
     
     if step_name in out:
         out[step_name].update(meta)
@@ -69,6 +72,19 @@ def get_step_name(original_meta: Mapping[str, Any], *, step_name: str | None) ->
         step = f"{prefix}_{next_instance}"
     
     return step
+
+def get_status(original_meta: Mapping[str, Any]) -> StatusFlag: 
+    """ 
+    Extract the status flag from the metadata, defaulting to 'active' if not present or invalid. 
+    
+    Args: 
+        original_meta: The original metadata dictionary to extract the status from. 
+    
+    Returns: 
+        A StatusFlag string indicating the status of the image.
+    """
+    status = original_meta.get('status', DEFAULT_FLAG)
+    return status if status in ALLOWED_FLAGS else DEFAULT_FLAG
 
 def validate_labels(labels: str | Sequence[str] | None, n_channels: int) -> list[str] | None:
     """Validate and normalize channel labels for metadata.

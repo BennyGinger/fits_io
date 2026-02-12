@@ -1,34 +1,21 @@
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
 
 from fits_io.readers._types import ExtraTags, PixelDensity, PixelSize, StatusFlag
-from fits_io.readers.info import InfoProfile
 from fits_io.metadata.lut import LABEL_TO_COLOR, COLOR_MAP, make_color_lut
 
 
 class StackMeta:
     
-    def __init__(self, axes: str, status: StatusFlag, user_name: str = 'unknown', finterval: float | None = None) -> None:
+    def __init__(self, axes: str, finterval: float | None = None) -> None:
         self.axes = axes
-        self._status: StatusFlag = status
-        self.user_name = user_name
         self.finterval = finterval
     
-    @property
-    def info(self) -> str:
-        """Return ImageJ-style Info string for status and user."""
-        status_profile = InfoProfile(status=self._status, user=self.user_name)
-        return status_profile.export
-    
-    def change_status(self, new_status: StatusFlag) -> None:
-        self._status = new_status
-    
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any]=  {'axes': self.axes,
-                             'Info': self.info}
+        d: dict[str, Any]=  {'axes': self.axes}
         if self.finterval is not None:
             d['finterval'] = self.finterval
         return d
@@ -93,8 +80,49 @@ class ChannelMeta:
         if self.luts is not None:
             d['LUTs'] = self.luts
         return d
+
+
+
+@dataclass(slots=True, frozen=True)
+class InfoSummary: 
+    status: StatusFlag
+    user_name: str
+    chosen_labels: list[str] | None
+    current_meta: Mapping[str, Any] | None
     
-    
+    def render(self) -> str:
+        delimiter = "----------------------"
+        info = [
+        delimiter,
+        "FITS PIPELINE METADATA",
+        delimiter + "\n",
+        f"status: {self.status}",
+        f"user: {self.user_name}",
+        ]
+
+        labels = "unknown" if self.chosen_labels is None else self.chosen_labels
+        info.append(f"channel labels: {labels}")
+        
+        if self.current_meta is None:
+            return "\n".join(info) + "\n" + "\n"
+        
+        meta = dict(self.current_meta).copy()
+        z_proj = meta.pop('z_projection_method', 'None')
+        info.append(f"z_projection: {z_proj}")
+        
+        meta.pop('status', None)
+        if not meta:
+            return "\n".join(info) + "\n" + "\n"
+        
+        info.append("\n--- Processed Step ---\n")
+        for k, v in meta.items():
+            timestamp = v.get('timestamp', "unknown") if isinstance(v, Mapping) else "unknown"
+            line = f"{k}: with time stamp of {timestamp}"
+            info.append(line)
+        
+        return "\n".join(info) + "\n" + "\n"
+            
+
 @dataclass(slots=True)
 class TiffMetadata:
     """Container for ImageJ-compatible TIFF metadata."""

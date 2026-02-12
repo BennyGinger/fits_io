@@ -27,7 +27,7 @@ class TiffReader(ImageReader):
     _resolution: list[PixelSize | None] = field(init=False, default_factory=list)
     _imageJ_meta: dict[str, Any] = field(init=False)
     _status: StatusFlag = field(init=False)
-    _custom_metadata: Mapping[str, Any] | None = field(init=False)
+    _custom_metadata: Mapping[str, Any] = field(init=False)
     
     @classmethod
     def can_read(cls, path: Path) -> bool:
@@ -72,9 +72,9 @@ class TiffReader(ImageReader):
         y_um_per_pix = round(1./float(yres), 4)
         return (x_um_per_pix, y_um_per_pix)
     
-    def _get_custom_metadata_from_tags(self, meta_tag: TiffTag | None) -> Mapping[str, Any] | None:
+    def _get_custom_metadata_from_tags(self, meta_tag: TiffTag | None) -> Mapping[str, Any]:
         if meta_tag is None:
-            return None
+            return {}
         
         v = meta_tag.value
         if isinstance(v, (bytes, bytearray)):
@@ -83,7 +83,7 @@ class TiffReader(ImageReader):
             return json.loads(v)
         except Exception:
             logger.warning("FITS_TAG present but not valid JSON")
-            return None
+            return {}
     
     def _parse_info(self) -> dict[str, str]:
         r"""
@@ -102,10 +102,8 @@ class TiffReader(ImageReader):
         return out
     
     def _get_status_from_metadata(self) -> StatusFlag:
-        info = self._parse_info()
-        prefix = INFO_NAMESPACE
-
-        flag = info.get(f"{prefix}.status", DEFAULT_FLAG)
+        
+        flag = self._custom_metadata.get("status", DEFAULT_FLAG)
         return flag if flag in ALLOWED_FLAGS else DEFAULT_FLAG
     
     @property
@@ -120,10 +118,6 @@ class TiffReader(ImageReader):
     @property
     def status(self) -> StatusFlag:
         return self._status
-    
-    @property
-    def export_status(self,) -> str:
-        return InfoProfile(status=self._status).export
     
     @property
     def channel_number(self) -> list[int]:
@@ -168,8 +162,6 @@ class TiffReader(ImageReader):
     
     @property
     def custom_metadata(self) -> Mapping[str, Any]:
-        if self._custom_metadata is None:
-            return {}
         return self._custom_metadata
     
     def get_array(self, z_projection: Zproj = None) -> NDArray | list[NDArray]:
