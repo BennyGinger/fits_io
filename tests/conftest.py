@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from fits_io.image_reader import ArrAxis, ImageReader, StatusFlag, Zproj
+from fits_io.readers.factory import ArrAxis, ImageReader, StatusFlag, Zproj
 
 
 # ============================================================
@@ -406,7 +406,7 @@ class WriterHarness:
 
 @pytest.fixture
 def writer_harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> WriterHarness:
-    import fits_io.writer as writer_mod
+    import fits_io.writers.api as writer_mod
 
     h = WriterHarness(tmp_path=tmp_path, writer_mod=writer_mod)
     h.save_dirs = [tmp_path / "img_s1"]
@@ -446,6 +446,6 @@ def writer_harness_tiff(monkeypatch: pytest.MonkeyPatch, writer_harness: WriterH
     Same harness, but makes DummyReader pass the `isinstance(..., TiffReader)` guard
     used in set_status/set_channel_labels. :contentReference[oaicite:2]{index=2}
     """
-    import fits_io.writer as writer_mod
+    import fits_io.writers.api as writer_mod
     monkeypatch.setattr(writer_mod, "TiffReader", type(dummy_reader))
     return writer_harness

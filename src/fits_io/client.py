@@ -3,12 +3,17 @@ from typing import Any, Mapping, Sequence
 
 from numpy.typing import NDArray
 
-from fits_io.image_reader import ImageReader, StatusFlag, get_reader, Zproj
-from fits_io.writer import convert_to_fits_tif, save_fits_array, set_channel_labels, set_status, DEFAULT_OUTPUT_NAME
-from fits_io.filesystem import get_save_dirs
+from fits_io.readers.protocol import ImageReader
+from fits_io.readers._types import ExtTags, StatusFlag, Zproj
+from fits_io.readers.factory import get_reader
+from fits_io.writers.api import convert_to_fits_tif, save_fits_array, set_channel_labels, set_status, DEFAULT_OUTPUT_NAME
+from fits_io.writers.filesystem import get_save_dirs
+
 
 DISTRIBUTION_NAME = "fits-io"
 STEP_NAME = "convert"
+SUPPORTED_EXTENSIONS: set[ExtTags] = {'.tiff', '.tif', '.nd2'}
+
 
 class FitsIO:
     """
@@ -86,14 +91,13 @@ class FitsIO:
         """
         return self.reader.get_channel(channel, z_projection=z_projection)
     
-    # FIXME: For now, always return list of Paths, could be changed later
     def get_save_dirs(self) -> list[Path]:
         """
         Get the output directory paths name to save experiment converted arrays.
         """
         return get_save_dirs(self.reader)
     
-    def convert_to_fits(self, *, user_name: str = 'unknown', channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', distribution: str | None = DISTRIBUTION_NAME, step_name: str | None = STEP_NAME, output_name: str = DEFAULT_OUTPUT_NAME, user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None,compression: str | None = 'zlib', overwrite: bool = False) -> list[Path]:
+    def convert_to_fits(self, *, user_name: str = 'unknown', channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', distribution: str | None = DISTRIBUTION_NAME, step_name: str | None = STEP_NAME, output_name: str = DEFAULT_OUTPUT_NAME, expected_filenames: set[str] | None = None, user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None,compression: str | None = 'zlib', overwrite: bool = False) -> list[Path]:
         """
         Convert an image file to a FITS TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
         Args:
@@ -103,6 +107,7 @@ class FitsIO:
             distribution : Name of the distribution or package, by default None
             step_name : Name of the processing step, by default None
             output_name : Optional name of the output TIFF file.
+            expected_filenames : Optional set of expected output filenames (without paths) to validate against after conversion, by default None
             user_defined_metadata : Additional custom metadata to include in the TIFF file, by default None
             z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
             compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'. Possible values are 'zlib', 'lzma', 'zstd', 'lz4', 'lzw', 'packbits' and 'jpeg'
@@ -117,6 +122,7 @@ class FitsIO:
                             distribution=distribution, 
                             step_name=step_name, 
                             output_name=output_name,
+                            expected_filenames=expected_filenames,
                             user_defined_metadata=user_defined_metadata,
                             z_projection=z_projection, 
                             compression=compression, 

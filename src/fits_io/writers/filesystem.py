@@ -2,12 +2,12 @@ from pathlib import Path
 import re
 from typing import Sequence
 
-from fits_io.image_reader import ImageReader
+from fits_io.readers.factory import ImageReader
 
 DEFAULT_SAVE_NAME = "array.tif"
 
 
-def ends_with_s_number(string: str) -> bool:
+def _ends_with_s_number(string: str) -> bool:
     return bool(re.search(r'_s[0-9][0-9]{0,2}$', string))
 
 def get_save_dirs(img_reader: ImageReader) -> list[Path]:
@@ -29,7 +29,7 @@ def get_save_dirs(img_reader: ImageReader) -> list[Path]:
     parent_dir = img_reader.img_path.parent
     
     # If files already a fits file then parent directory already contains a '_sN' pattern
-    if ends_with_s_number(parent_dir.name):
+    if _ends_with_s_number(parent_dir.name):
         return [parent_dir]
     
     # Otherwise create per-series directories
@@ -63,5 +63,5 @@ def build_output_path(series_dir: Path, *, save_name: str) -> Path:
 if __name__ == "__main__":
     s1 = "/data/experiment1_s0235"
     s2 = "/data/experiment1"
-    print(ends_with_s_number(s1))  # True
-    print(ends_with_s_number(s2))  # False
+    print(_ends_with_s_number(s1))  # True
+    print(_ends_with_s_number(s2))  # False

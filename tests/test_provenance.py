@@ -1,13 +1,13 @@
 from datetime import datetime, timezone
 
-from fits_io.provenance import get_dist_version, get_timestamp, is_processed, add_provenance_profile, utc_now_iso
+from fits_io.metadata.provenance import _get_dist_version, get_timestamp, _is_processed, add_provenance_profile, _utc_now_iso
 
 
 # Tests for get_dist_version
 def test_get_dist_version_returns_version_for_installed_package():
     """Should return version string for an installed package."""
     # pytest should be installed in test environment
-    version = get_dist_version("pytest")
+    version = _get_dist_version("pytest")
     
     assert isinstance(version, str)
     assert version != "unknown"
@@ -16,7 +16,7 @@ def test_get_dist_version_returns_version_for_installed_package():
 
 def test_get_dist_version_returns_unknown_for_nonexistent_package():
     """Should return 'unknown' for packages that don't exist."""
-    version = get_dist_version("this-package-definitely-does-not-exist-12345")
+    version = _get_dist_version("this-package-definitely-does-not-exist-12345")
     
     assert version == "unknown"
 
@@ -24,7 +24,7 @@ def test_get_dist_version_returns_unknown_for_nonexistent_package():
 # Tests for utc_now_iso
 def test_utc_now_iso_returns_iso_format_string():
     """Should return ISO format timestamp string."""
-    timestamp = utc_now_iso()
+    timestamp = _utc_now_iso()
     
     assert isinstance(timestamp, str)
     # Should be parseable as ISO format
@@ -34,7 +34,7 @@ def test_utc_now_iso_returns_iso_format_string():
 
 def test_utc_now_iso_is_utc_timezone():
     """Should return timestamp in UTC timezone."""
-    timestamp = utc_now_iso()
+    timestamp = _utc_now_iso()
     parsed = datetime.fromisoformat(timestamp)
     
     # Check it's close to current UTC time (within 1 second)
@@ -93,26 +93,26 @@ def test_is_processed_returns_true_when_step_exists():
     """Should return True when step is in metadata."""
     metadata = {"my_step": {"some": "data"}}
     
-    assert is_processed(metadata, step="my_step") is True
+    assert _is_processed(metadata, step="my_step") is True
 
 
 def test_is_processed_returns_false_when_step_missing():
     """Should return False when step is not in metadata."""
     metadata = {"other_step": {"some": "data"}}
     
-    assert is_processed(metadata, step="my_step") is False
+    assert _is_processed(metadata, step="my_step") is False
 
 
 def test_is_processed_returns_false_for_empty_metadata():
     """Should return False for empty metadata dict."""
-    assert is_processed({}, step="my_step") is False
+    assert _is_processed({}, step="my_step") is False
 
 
 def test_is_processed_returns_false_for_non_mapping():
     """Should return False if metadata is not a mapping."""
-    assert is_processed(None, step="my_step") is False # pyright: ignore
-    assert is_processed("not a dict", step="my_step") is False # pyright: ignore
-    assert is_processed([], step="my_step") is False # pyright: ignore
+    assert _is_processed(None, step="my_step") is False # pyright: ignore
+    assert _is_processed("not a dict", step="my_step") is False # pyright: ignore
+    assert _is_processed([], step="my_step") is False # pyright: ignore
 
 
 # Tests for get_timestamp

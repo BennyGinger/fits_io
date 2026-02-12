@@ -1,14 +1,36 @@
-from typing import Sequence
+from pathlib import Path
 import logging
-
-from numpy.typing import NDArray
-import numpy as np
-
-from fits_io.image_reader import ImageReader, Zproj
+from typing import Sequence
 
 
 logger = logging.getLogger(__name__)
 
+
+def _series_has_outputs(save_dir: Path, expected_filenames: set[str]) -> bool:
+    """Check if a given series directory contains converted FITS arrays.
+    
+    Args:
+        save_dir: Path to the series directory.
+        expected_filenames: Set of expected output filenames for the series, e.g. {"array.tif", "array_zproj.tif"}.
+    Returns:
+        True if the directory exists and contains at least one file, False otherwise.
+    """
+    if not save_dir.is_dir():
+        return False
+    
+    return any((save_dir / name).is_file() for name in expected_filenames)
+
+def image_converted(save_dirs: list[Path], expected_filenames: set[str]) -> bool:
+    """
+    Check if all series of an image have been converted and saved.
+    Args:
+        save_dirs: List of Paths to the series directories of an image.
+        expected_filenames: Set of expected output filenames for each series, e.g. {"array.tif", "array_zproj.tif"}.
+        
+    Returns:
+        True if all series directories exist and contain converted FITS arrays, False otherwise.
+    """
+    return all(_series_has_outputs(d, expected_filenames) for d in save_dirs)
 
 def resolve_channel_labels(channel_labels: str | Sequence[str] | None, n_channels: int, export_channels: str | Sequence[str]) -> tuple[list[str], bool]:
     """
@@ -56,25 +78,3 @@ def resolve_channel_labels(channel_labels: str | Sequence[str] | None, n_channel
             out_channel = requested
     logger.debug(f"Resolved channel labels for export: {out_channel} from original {channel_labels} with export_all_flag set to {export_all_flag}")
     return out_channel, export_all_flag
-        
-def get_array_to_export(img_reader: ImageReader, export_channels: list[str], export_all_flag: bool, z_projection: Zproj = None) -> list[NDArray]:
-    """
-    Get the array(s) to export from the image reader based on the resolved channel labels and export flag. If exporting all channels, retrieves the full array; otherwise, retrieves only the specified channels. Handles cases where the retrieved arrays may be empty and raises an error if so.
-    
-    Args:
-        img_reader: The image reader to retrieve the arrays from.
-        export_channels: The resolved channel labels to export.
-        export_all_flag: A boolean indicating if all channels are being exported.
-        z_projection: An optional Z projection method to apply when retrieving the arrays.
-    """
-    
-    
-    if export_all_flag:
-        arrays = img_reader.get_array(z_projection)
-    else:
-        arrays = img_reader.get_channel(export_channels, z_projection)
-    
-    arrays_list = [arrays] if isinstance(arrays, np.ndarray) else list(arrays)
-    if any(a.size == 0 for a in arrays_list):
-        raise ValueError("Export produced empty arrays (likely unsupported channel extraction or reader bug).")
-    return arrays_list

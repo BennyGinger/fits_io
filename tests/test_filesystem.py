@@ -5,9 +5,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import fits_io.writer as writer_module
-from fits_io.filesystem import build_output_path, get_save_dirs, mkdirs_paths
-from fits_io.image_reader import TiffReader
+import fits_io.writers.api as writer_module
+from fits_io.writers.filesystem import build_output_path, get_save_dirs, mkdirs_paths
+from fits_io.readers.factory import TiffReader
 from fits_io.metadata import TiffMetadata
 
 

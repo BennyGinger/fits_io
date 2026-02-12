@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-import fits_io.writer as writer_mod
+import fits_io.writers.api as writer_mod
 
 
 # -----------------------

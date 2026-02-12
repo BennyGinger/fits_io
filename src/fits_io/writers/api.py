@@ -3,39 +3,24 @@ from typing import Mapping, Sequence, Any
 import logging
 from functools import partial
 
-from numpy.typing import NDArray
-from tifffile import imwrite
-
-from fits_io.provenance import image_converted
-from fits_io.image_reader import ImageReader, TiffReader, StatusFlag, ALLOWED_FLAGS, Zproj
-from fits_io.metadata import build_imagej_metadata, TiffMetadata
-from fits_io.filesystem import get_save_dirs, build_output_path, mkdirs_paths
-from fits_io.conversion import resolve_channel_labels, get_array_to_export
+from fits_io.readers._types import StatusFlag, Zproj
+from fits_io.readers.protocol import ImageReader, ALLOWED_FLAGS
+from fits_io.readers.factory import get_reader
+from fits_io.metadata.builder import build_metadata
+from fits_io.readers.r_tiff import TiffReader
+from fits_io.writers.validation import resolve_channel_labels, image_converted
+from fits_io.writers.filesystem import get_save_dirs, build_output_path, mkdirs_paths
+from fits_io.writers.core import save_tiff
+from fits_io.writers.utils import get_array_to_export
 
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_OUTPUT_NAME = 'fits.tif'
 
-def _save_tiff(img_array: NDArray, save_path: Path, metadata: TiffMetadata, compression: str | None = 'zlib') -> None:
-    
-    predictor = 2 if compression in {"zlib", "deflate", "lzma"} else None
-    logger.debug(f"_save_tiff: compression={compression} predictor={predictor} dtype={img_array.dtype} shape={img_array.shape} size={img_array.size}")
-    
-    if img_array.size == 0:
-        raise ValueError("Cannot save empty array to TIFF. The input array has zero elements.")
-    
-    imwrite(save_path,
-            img_array,
-            imagej=True,
-            metadata=metadata.imagej_meta,
-            resolution=metadata.resolution,
-            predictor=predictor,
-            extratags=metadata.extratags,
-            compression=compression,
-    )
 
-def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', distribution: str | None = None, step_name: str | None = None, output_name: str = DEFAULT_OUTPUT_NAME, channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib', overwrite: bool = False) -> list[Path]:
+
+def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', distribution: str | None = None, step_name: str | None = None, output_name: str = DEFAULT_OUTPUT_NAME, expected_filenames: set[str] | None = None, channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib', overwrite: bool = False) -> list[Path]:
     """
     Convert an image file to a FITS TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
     Args:
@@ -44,6 +29,7 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
         distribution : Name of the distribution or package, by default None
         step_name : Name of the processing step, by default None
         output_name : Optional name of the output TIFF file.
+        expected_filenames : Optional set of expected output filenames to check for existing converted files, e.g. {"array.tif", "array_zproj.tif"}. If None, defaults to {output_name}.
         channel_labels : Optional labels for source channels (used for mapping), if None, default labels will be used. 
         export_channels : Subset channels to export. Can be 'all' or a list of channel labels, by default 'all'
         user_defined_metadata : Additional custom metadata to include in the TIFF file, by default None
@@ -57,7 +43,8 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
     save_dirs = get_save_dirs(img_reader)
     
     # check if exp was processed/registered
-    if image_converted(save_dirs) and not overwrite:
+    expected_filenames = expected_filenames or {output_name}
+    if image_converted(save_dirs, expected_filenames) and not overwrite:
         logger.info(f"Image {img_reader.img_path} has already been converted. Skipping conversion.")
         return save_dirs
     
@@ -72,7 +59,7 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
     arrays = get_array_to_export(img_reader, used_channels, export_all_flag, z_projection)
     
     # Prepare metadata
-    build_md = partial(build_imagej_metadata,
+    build_md = partial(build_metadata,
                         img_reader,
                         user_name=user_name,
                         distribution=distribution,
@@ -89,7 +76,7 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
         # finish building metadata
         meta = build_md(series_index=i)
         # save TIFF
-        _save_tiff(array, path, meta, compression=compression)
+        save_tiff(array, path, meta, compression=compression)
     return save_path_lst
 
 def save_fits_array(img_reader: ImageReader, *, distribution: str | None = None, step_name: str | None = None, output_name: str = DEFAULT_OUTPUT_NAME, user_name: str = 'unknown', user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib') -> None:
@@ -105,7 +92,7 @@ def save_fits_array(img_reader: ImageReader, *, distribution: str | None = None,
         compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'
     """
     # get metadata
-    meta = build_imagej_metadata(img_reader, 
+    meta = build_metadata(img_reader, 
                                  distribution=distribution,
                                  step_name=step_name,
                                  user_name=user_name,
@@ -119,7 +106,7 @@ def save_fits_array(img_reader: ImageReader, *, distribution: str | None = None,
     if isinstance(array, list):
         raise ValueError("Multiple series detected; use convert_to_fits_tif.")
     
-    _save_tiff(array, save_path, meta, compression=compression)
+    save_tiff(array, save_path, meta, compression=compression)
 
 def set_status(img_reader: ImageReader, status: StatusFlag, user_name: str = 'unknown') -> None:
     """
@@ -139,7 +126,7 @@ def set_status(img_reader: ImageReader, status: StatusFlag, user_name: str = 'un
     if status not in ALLOWED_FLAGS:
         raise ValueError(f"Invalid status: {status}. Must be one of {ALLOWED_FLAGS}")
     
-    meta = build_imagej_metadata(img_reader,
+    meta = build_metadata(img_reader,
                                  user_name=user_name,
                                  add_provenance=False, # do not add provenance for status change
                                  new_status=status)
@@ -151,7 +138,7 @@ def set_status(img_reader: ImageReader, status: StatusFlag, user_name: str = 'un
     if isinstance(array, list):
         raise ValueError("Expected a single array, but got multiple series. You may need to use convert_to_fits_tif instead.")
     
-    _save_tiff(array, img_reader.img_path, meta, compression=compression)
+    save_tiff(array, img_reader.img_path, meta, compression=compression)
 
 def set_channel_labels(img_reader: ImageReader, channel_labels: str | Sequence[str], user_name: str = 'unknown') -> None:
     """
@@ -170,7 +157,7 @@ def set_channel_labels(img_reader: ImageReader, channel_labels: str | Sequence[s
         raise TypeError("set_channel_labels only supports .tif/.tiff files.")
     
     # Get existing metadata to preserve other fields
-    meta = build_imagej_metadata(img_reader,
+    meta = build_metadata(img_reader,
                                  user_name=user_name,
                                  channel_labels=channel_labels,
                                  add_provenance=False) # do not add provenance for metadata update
@@ -182,14 +169,14 @@ def set_channel_labels(img_reader: ImageReader, channel_labels: str | Sequence[s
     if isinstance(array, list):
         raise ValueError("Expected a single array, but got multiple series. You may need to use convert_to_fits_tif instead.")
     
-    _save_tiff(array, img_reader.img_path, meta, compression=compression)  
+    save_tiff(array, img_reader.img_path, meta, compression=compression)  
 
 
 
 if __name__ == '__main__':
     from time import time
     import tifffile as tiff
-    from fits_io.image_reader import get_reader
+    from fits_io.readers.factory import get_reader
 
     t1 = time()
     

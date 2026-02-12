@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from fits_io.conversion import resolve_channel_labels, get_array_to_export
+from fits_io.writers.utils import resolve_channel_labels, get_array_to_export
 
 
 # -----------------------------

@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from pathlib import Path
 
-import fits_io.image_reader as m
+import fits_io.readers.factory as m
 
 
 def test_get_reader_tif(tmp_path: Path, monkeypatch, fake_tiff_file_no_series):

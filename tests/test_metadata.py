@@ -275,23 +275,23 @@ def test_build_imagej_metadata_add_provenance_false_ignores_extra_step_metadata(
 # -------------------------
 
 def test_normalize_channel_labels_none_returns_none():
-    assert md._normalize_channel_labels(None, n_channels=3) is None
+    assert md._validate_labels(None, n_channels=3) is None
 
 
 def test_normalize_channel_labels_string_with_one_channel():
-    assert md._normalize_channel_labels("GFP", n_channels=1) == ["GFP"]
+    assert md._validate_labels("GFP", n_channels=1) == ["GFP"]
 
 
 def test_normalize_channel_labels_string_with_multiple_channels_raises():
     with pytest.raises(ValueError):
-        md._normalize_channel_labels("GFP", n_channels=2)
+        md._validate_labels("GFP", n_channels=2)
 
 
 def test_normalize_channel_labels_sequence_matches_channel_count():
     labels = ["GFP", "mCherry"]
-    assert md._normalize_channel_labels(labels, n_channels=2) == labels
+    assert md._validate_labels(labels, n_channels=2) == labels
 
 
 def test_normalize_channel_labels_sequence_wrong_length_raises():
     with pytest.raises(ValueError):
-        md._normalize_channel_labels(["GFP"], n_channels=2)
+        md._validate_labels(["GFP"], n_channels=2)

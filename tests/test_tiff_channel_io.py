@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import tifffile as tiff
 
-from fits_io.tiff_axis_io import read_tiff_channels
+from fits_io.readers.tiff_axis_io import read_tiff_channels
 
 
 @pytest.fixture()
