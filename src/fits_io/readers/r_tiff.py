@@ -5,7 +5,6 @@ import json
 import logging
 
 from fits_io.metadata.provenance import FITS_TAG
-from fits_io.readers.info import INFO_NAMESPACE, InfoProfile
 from fits_io.readers.tiff_axis_io import read_tiff_channels
 from numpy.typing import NDArray
 from tifffile import TiffFile, TiffPage, imread, COMPRESSION, TiffTag

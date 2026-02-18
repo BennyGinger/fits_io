@@ -6,11 +6,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping, Sequence, Callable
 
+from fits_io.readers._types import ArrAxis, StatusFlag, Zproj
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from fits_io.readers.factory import ArrAxis, ImageReader, StatusFlag, Zproj
+from fits_io.readers.protocol import ImageReader
 
 
 # ============================================================
@@ -248,6 +249,69 @@ def fake_tiff_file_series_S0() -> Callable[[Path], FakeTiff]:
     return _factory
 
 
+@pytest.fixture
+def fake_tiff_file_with_info() -> Callable[[Path], FakeTiff]:
+    def _factory(path: Path):
+        tags = [FakeTag("Compression", 1)]
+        ij = {"Info": "key1: value1\nkey2: value2\n"}
+        return FakeTiff(axes="YX", shape=(5, 6), tags=tags, imagej_metadata=ij)
+    return _factory
+
+
+@pytest.fixture
+def fake_tiff_file_with_status() -> Callable[[Path], FakeTiff]:
+    def _factory(path: Path):
+        import json
+        from fits_io.metadata.provenance import FITS_TAG
+        
+        tags = [
+            FakeTag("Compression", 1),
+            FakeTag("CustomTag", json.dumps({"status": "skip"}).encode("utf-8"), code=FITS_TAG)
+        ]
+        return FakeTiff(axes="YX", shape=(5, 6), tags=tags, imagej_metadata={})
+    return _factory
+
+
+@pytest.fixture
+def fake_tiff_file_with_single_label() -> Callable[[Path], FakeTiff]:
+    def _factory(path: Path):
+        tags = [FakeTag("Compression", 1)]
+        ij = {"Labels": "DAPI"}
+        return FakeTiff(axes="CYX", shape=(1, 5, 6), tags=tags, imagej_metadata=ij)
+    return _factory
+
+
+@pytest.fixture
+def fake_tiff_file_with_label_list() -> Callable[[Path], FakeTiff]:
+    def _factory(path: Path):
+        tags = [FakeTag("Compression", 1)]
+        ij = {"Labels": ["DAPI", "GFP", "RFP"]}
+        return FakeTiff(axes="CYX", shape=(3, 5, 6), tags=tags, imagej_metadata=ij)
+    return _factory
+
+
+@pytest.fixture
+def fake_tiff_file_with_custom_meta() -> Callable[[Path], FakeTiff]:
+    def _factory(path: Path):
+        import json
+        from fits_io.metadata.provenance import FITS_TAG
+        
+        tags = [
+            FakeTag("Compression", 1),
+            FakeTag("CustomTag", json.dumps({"status": "active", "extra": "data"}).encode("utf-8"), code=FITS_TAG)
+        ]
+        return FakeTiff(axes="YX", shape=(5, 6), tags=tags, imagej_metadata={})
+    return _factory
+
+
+@pytest.fixture
+def fake_tiff_file_with_compression() -> Callable[[Path], FakeTiff]:
+    def _factory(path: Path):
+        tags = [FakeTag("Compression", 8)]  # 8 = ADOBE_DEFLATE
+        return FakeTiff(axes="YX", shape=(5, 6), tags=tags, imagej_metadata={})
+    return _factory
+
+
 # ============================================================
 # ND2 fakes (moved from test_image_reader.py)
 # ============================================================
@@ -381,6 +445,54 @@ def fake_nd2_file_noP():
     return _factory
 
 
+@pytest.fixture
+def fake_nd2_file_3channels():
+    """ND2 file with 3 channels (for testing channel indexing)."""
+    def _factory(path: Path):
+        sizes = {"C": 3, "Y": 5, "X": 6}
+        meta = _Meta_channels_calib()
+        exploop = []
+        return FakeND2(sizes, meta, exploop)
+    return _factory
+
+
+@pytest.fixture
+def fake_nd2_file_with_labels():
+    """ND2 file with 3 channels with named labels."""
+    def _factory(path: Path):
+        class ChannelMeta:
+            def __init__(self, name):
+                self.name = name
+        
+        class ChannelWithMeta:
+            def __init__(self, name):
+                self.channel = ChannelMeta(name)
+        
+        class MetaWithLabels:
+            channels = [
+                ChannelWithMeta("DAPI"),
+                ChannelWithMeta("GFP"),
+                ChannelWithMeta("RFP"),
+            ]
+        
+        sizes = {"C": 3, "Y": 5, "X": 6}
+        meta = MetaWithLabels()
+        exploop = []
+        return FakeND2(sizes, meta, exploop)
+    return _factory
+
+
+@pytest.fixture
+def fake_nd2_file_no_native_labels():
+    """ND2 file without channel metadata (no native labels)."""
+    def _factory(path: Path):
+        sizes = {"C": 3, "Y": 5, "X": 6}
+        meta = _Meta_no_channels()
+        exploop = []
+        return FakeND2(sizes, meta, exploop)
+    return _factory
+
+
 # ============================================================
 # Writer harness (as before) + a "tiff" variant
 # ============================================================
@@ -414,7 +526,7 @@ def writer_harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> WriterHar
     monkeypatch.setattr(writer_mod, "get_save_dirs", lambda _r: h.save_dirs)
     monkeypatch.setattr(writer_mod, "mkdirs_paths", lambda dirs: dirs)
     monkeypatch.setattr(writer_mod, "build_output_path", lambda d, *, save_name: d / save_name)
-    monkeypatch.setattr(writer_mod, "image_converted", lambda _dirs: h.already_converted)
+    monkeypatch.setattr(writer_mod, "image_converted", lambda _dirs, _expected: h.already_converted)
 
     monkeypatch.setattr(
         writer_mod,
@@ -427,16 +539,16 @@ def writer_harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> WriterHar
         lambda _r, _used, _flag, _zp: h.arrays,
     )
 
-    def fake_build_imagej_metadata(*args: Any, **kwargs: Any) -> Any:
+    def fake_build_metadata(*args: Any, **kwargs: Any) -> Any:
         h.md_calls.append(kwargs)
         return h.make_meta(**kwargs)
 
-    monkeypatch.setattr(writer_mod, "build_imagej_metadata", fake_build_imagej_metadata)
+    monkeypatch.setattr(writer_mod, "build_metadata", fake_build_metadata)
 
     def fake_save_tiff(array: NDArray, path: Path, meta: Any, *, compression: str | None = "zlib") -> None:
         h.saved.append({"array": array, "path": path, "meta": meta, "compression": compression})
 
-    monkeypatch.setattr(writer_mod, "_save_tiff", fake_save_tiff)
+    monkeypatch.setattr(writer_mod, "save_tiff", fake_save_tiff)
     return h
 
 
