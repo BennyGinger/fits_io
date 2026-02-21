@@ -54,10 +54,14 @@ def test_save_tiff_predictor_selection(
 
     arr = np.ones((5, 6), dtype=np.uint16)
     meta = SimpleNamespace(imagej_meta={"axes": "YX"}, resolution=(1.0, 1.0), extratags=[])
+    out_path = tmp_path / "out.tif"
 
-    core.save_tiff(arr, tmp_path / "out.tif", meta, compression=compression)  # type: ignore[arg-type]
+    core.save_tiff(arr, out_path, meta, compression=compression)  # type: ignore[arg-type]
 
-    assert captured["save_path"].name == "out.tif"
+    assert captured["save_path"].parent == tmp_path
+    assert captured["save_path"].suffix == ".tif"
+    assert captured["save_path"].name != "out.tif"
+    assert out_path.exists()
     assert captured["kwargs"]["predictor"] == expected_predictor
     assert captured["kwargs"]["compression"] == compression
     assert captured["kwargs"]["imagej"] is True

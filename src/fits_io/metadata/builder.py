@@ -12,13 +12,12 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DISTRIBUTION = 'unknown_distribution'
 
-def build_metadata(img_reader: ImageReader, *, user_name: str, distribution: str | None = None, step_name: str | None = None, channel_labels: str | Sequence[str] | None = None, z_projection: Zproj = None, extra_step_metadata: Mapping[str, Any] | None = None, add_step_meta: bool = True, new_status: StatusFlag | None = None, series_index: int = 0) -> TiffMetadata:
+def build_metadata(img_reader: ImageReader, *, distribution: str | None = None, step_name: str | None = None, channel_labels: str | Sequence[str] | None = None, z_projection: Zproj = None, extra_step_metadata: Mapping[str, Any] | None = None, add_step_meta: bool = True, new_status: StatusFlag | None = None, new_user: str | None = None, series_index: int = 0) -> TiffMetadata:
     """
     Build ImageJ-compatible metadata for saving TIFF files.
     
     Args:
         img_reader: An ImageReader instance to read metadata from.
-        user_name: Name of the user performing the conversion.
         distribution: Optional; name of the distribution or package.
         step_name: Optional; name of the processing step.
         channel_labels: Optional; either a single string label or a sequence of labels for each channel. If None, default labels will be used.
@@ -26,6 +25,7 @@ def build_metadata(img_reader: ImageReader, *, user_name: str, distribution: str
         extra_step_metadata: Optional mapping of additional metadata to include in the processing step.
         add_step_meta: Optional; if True, add step metadata information to the metadata.
         new_status: Optional; if provided, overrides the status in the metadata.
+        user_name: Optional, if provided, name of the user performing the conversion.
         series_index: Optional; index of the series to use for multi-series images, purely to save appropriate metadata.
     
     Returns:
@@ -58,12 +58,18 @@ def build_metadata(img_reader: ImageReader, *, user_name: str, distribution: str
     payload = dict(img_reader.custom_metadata)
     step = get_step_name(payload, step_name=step_name)
     status = new_status or get_status(payload)
+    user_name = new_user or payload.get('user_name', 'unknown')
     
     if add_step_meta:
         dist = distribution or DEFAULT_DISTRIBUTION
         payload = add_provenance_profile(payload, distribution=dist, step_name=step)
     
-    payload = update_metadata(payload, update_meta=extra_step_metadata, step_name=step, z_projection=z_projection, status=status)
+    payload = update_metadata(payload, 
+                              update_meta=extra_step_metadata, 
+                              user_name=user_name,
+                              step_name=step,
+                              z_projection=z_projection, 
+                              status=status)
     extratags = encode_metadata(payload)
         
     # extract metadata components

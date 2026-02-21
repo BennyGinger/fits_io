@@ -51,7 +51,7 @@ def build_meta():
     def _build(reader: ReaderStub, **kwargs: Any) -> TiffMetadata:
         return build_metadata(
             cast(ImageReader, reader),
-            user_name=kwargs.pop("user_name", "test_user"),
+            new_user=kwargs.pop("user_name", "test_user"),
             distribution=kwargs.pop("distribution", "test-dist"),
             step_name=kwargs.pop("step_name", "test_step"),
             **kwargs,

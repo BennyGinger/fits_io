@@ -97,7 +97,7 @@ class FitsIO:
         """
         return get_save_dirs(self.reader)
     
-    def convert_to_fits(self, *, user_name: str = 'unknown', channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', distribution: str | None = DISTRIBUTION_NAME, step_name: str | None = STEP_NAME, output_name: str = DEFAULT_OUTPUT_NAME, expected_filenames: set[str] | None = None, user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None,compression: str | None = 'zlib', overwrite: bool = False) -> list[Path]:
+    def convert_to_fits(self, *, user_name: str = 'unknown', channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', distribution: str | None = DISTRIBUTION_NAME, step_name: str | None = STEP_NAME, output_name: str = DEFAULT_OUTPUT_NAME, user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib') -> list[Path]:
         """
         Convert an image file to a FITS TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
         Args:
@@ -107,11 +107,9 @@ class FitsIO:
             distribution : Name of the distribution or package, by default None
             step_name : Name of the processing step, by default None
             output_name : Optional name of the output TIFF file.
-            expected_filenames : Optional set of expected output filenames (without paths) to validate against after conversion, by default None
             user_defined_metadata : Additional custom metadata to include in the TIFF file, by default None
             z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
-            compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'. Possible values are 'zlib', 'lzma', 'zstd', 'lz4', 'lzw', 'packbits' and 'jpeg'
-            overwrite : If True, overwrite existing files. If False and the output file exists, skip conversion, by default False
+            compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'. Possible values are 'zlib', 'lzma', 'zstd', 'lz4', 'lzw', 'packbits' and 'jpeg'.
         Returns:
             List of Paths of the saved TIFF files.
         """
@@ -122,14 +120,12 @@ class FitsIO:
                             distribution=distribution, 
                             step_name=step_name, 
                             output_name=output_name,
-                            expected_filenames=expected_filenames,
                             user_defined_metadata=user_defined_metadata,
                             z_projection=z_projection, 
-                            compression=compression, 
-                            overwrite=overwrite)
+                            compression=compression)
         return save_paths
 
-    def save_fits_array(self, user_name: str = 'unknown', distribution: str | None = None, step_name: str | None = None, output_name: str = DEFAULT_OUTPUT_NAME, z_projection: Zproj = None, user_metadata: Mapping[str, Any] | None = None, compression: str | None = 'zlib') -> None:
+    def save_fits_array(self, distribution: str | None = None, step_name: str | None = None, output_name: str = DEFAULT_OUTPUT_NAME, z_projection: Zproj = None, user_metadata: Mapping[str, Any] | None = None, compression: str | None = 'zlib') -> None:
         """
         Save the FITS array to a TIFF file with ImageJ metadata.
         
@@ -146,7 +142,6 @@ class FitsIO:
             compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'. Possible values are 'zlib', 'lzma', 'zstd', 'lz4', 'lzw', 'packbits' and 'jpeg'.
         """
         save_fits_array(self.reader, 
-                        user_name=user_name,
                         distribution=distribution, 
                         step_name=step_name, 
                         output_name=output_name,

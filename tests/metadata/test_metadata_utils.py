@@ -107,7 +107,7 @@ def test_update_metadata_adds_new_step():
     original = {}
     update = {"param": "value"}
     
-    result = update_metadata(original, update_meta=update, step_name="step1", z_projection=None, status="active")
+    result = update_metadata(original, update_meta=update, user_name="test_user", step_name="step1", z_projection=None, status="active")
     
     assert "step1" in result
     assert result["step1"]["param"] == "value"
@@ -120,7 +120,7 @@ def test_update_metadata_preserves_original():
     original = {"existing_step": {"data": "old"}}
     update = {"param": "new"}
     
-    result = update_metadata(original, update_meta=update, step_name="new_step", z_projection=None, status="active")
+    result = update_metadata(original, update_meta=update, user_name="test_user", step_name="new_step", z_projection=None, status="active")
     
     # Original should be unchanged
     assert original == {"existing_step": {"data": "old"}}
@@ -135,7 +135,7 @@ def test_update_metadata_merges_into_existing_step():
     original = {"step1": {"param1": "value1"}}
     update = {"param2": "value2"}
     
-    result = update_metadata(original, update_meta=update, step_name="step1", z_projection=None, status="active")
+    result = update_metadata(original, update_meta=update, user_name="test_user", step_name="step1", z_projection=None, status="active")
     
     assert result["step1"]["param1"] == "value1"
     assert result["step1"]["param2"] == "value2"
@@ -146,7 +146,7 @@ def test_update_metadata_overwrites_existing_keys():
     original = {"step1": {"param": "old_value"}}
     update = {"param": "new_value"}
     
-    result = update_metadata(original, update_meta=update, step_name="step1", z_projection=None, status="active")
+    result = update_metadata(original, update_meta=update, user_name="test_user", step_name="step1", z_projection=None, status="active")
     
     assert result["step1"]["param"] == "new_value"
 
@@ -155,7 +155,7 @@ def test_update_metadata_with_none_update():
     """Test that None update_meta adds status and z_projection to metadata."""
     original = {"step1": {"data": "value"}}
     
-    result = update_metadata(original, update_meta=None, step_name="step2", z_projection=None, status="active")
+    result = update_metadata(original, update_meta=None, user_name="test_user", step_name="step2", z_projection=None, status="active")
     
     assert result["step1"] == {"data": "value"}
     assert result["status"] == "active"
@@ -166,7 +166,7 @@ def test_update_metadata_with_empty_update():
     """Test that empty dict update adds status and z_projection to metadata."""
     original = {"step1": {"data": "value"}}
     
-    result = update_metadata(original, update_meta={}, step_name="step2", z_projection=None, status="skip")
+    result = update_metadata(original, update_meta={}, user_name="test_user", step_name="step2", z_projection=None, status="skip")
     
     assert result["step1"] == {"data": "value"}
     assert result["status"] == "skip"
@@ -178,7 +178,7 @@ def test_update_metadata_adds_z_projection_when_provided():
     original = {}
     update = {"param": "value"}
     
-    result = update_metadata(original, update_meta=update, step_name="step1", z_projection="max", status="active")
+    result = update_metadata(original, update_meta=update, user_name="test_user", step_name="step1", z_projection="max", status="active")
     
     assert result["step1"]["param"] == "value"
     assert result["z_projection_method"] == "max"
@@ -189,7 +189,7 @@ def test_update_metadata_z_projection_without_extra_meta():
     original = {}
     update = {}
     
-    result = update_metadata(original, update_meta=update, step_name="step1", z_projection="mean", status="active")
+    result = update_metadata(original, update_meta=update, user_name="test_user", step_name="step1", z_projection="mean", status="active")
     
     # Empty update adds status and z_projection but not step
     assert result["status"] == "active"
@@ -203,7 +203,7 @@ def test_update_metadata_various_z_projections(z_proj):
     original = {}
     update = {"param": "value"}
     
-    result = update_metadata(original, update_meta=update, step_name="step1", z_projection=z_proj, status="active")
+    result = update_metadata(original, update_meta=update, user_name="test_user", step_name="step1", z_projection=z_proj, status="active")
     
     assert result["z_projection_method"] == z_proj
 
@@ -213,7 +213,7 @@ def test_update_metadata_complex_nested_structures():
     original = {"step1": {"nested": {"deep": "value"}}}
     update = {"new_nested": {"data": [1, 2, 3]}}
     
-    result = update_metadata(original, update_meta=update, step_name="step2", z_projection=None, status="active")
+    result = update_metadata(original, update_meta=update, user_name="test_user", step_name="step2", z_projection=None, status="active")
     
     assert result["step1"]["nested"]["deep"] == "value"
     assert result["step2"]["new_nested"]["data"] == [1, 2, 3]
@@ -224,11 +224,11 @@ def test_update_metadata_multiple_steps():
     original = {}
     
     # Add first step
-    result1 = update_metadata(original, update_meta={"p1": "v1"}, step_name="step1", z_projection=None, status="active")
+    result1 = update_metadata(original, update_meta={"p1": "v1"}, user_name="test_user", step_name="step1", z_projection=None, status="active")
     # Add second step
-    result2 = update_metadata(result1, update_meta={"p2": "v2"}, step_name="step2", z_projection="max", status="active")
+    result2 = update_metadata(result1, update_meta={"p2": "v2"}, user_name="test_user", step_name="step2", z_projection="max", status="active")
     # Add to first step again
-    result3 = update_metadata(result2, update_meta={"p3": "v3"}, step_name="step1", z_projection="max", status="skip")
+    result3 = update_metadata(result2, update_meta={"p3": "v3"}, user_name="test_user", step_name="step1", z_projection="max", status="skip")
     
     assert result3["step1"]["p1"] == "v1"
     assert result3["step1"]["p3"] == "v3"

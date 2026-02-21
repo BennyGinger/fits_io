@@ -1,3 +1,4 @@
+import tempfile
 from pathlib import Path
 import logging
 
@@ -17,12 +18,27 @@ def save_tiff(img_array: NDArray, save_path: Path, metadata: TiffMetadata, compr
     if img_array.size == 0:
         raise ValueError("Cannot save empty array to TIFF. The input array has zero elements.")
     
-    imwrite(save_path,
-            img_array,
-            imagej=True,
-            metadata=metadata.imagej_meta,
-            resolution=metadata.resolution,
-            predictor=predictor,
-            extratags=metadata.extratags,
-            compression=compression,
-    )
+    with tempfile.NamedTemporaryFile(
+        dir=save_path.parent,
+        suffix=save_path.suffix,
+        delete=False
+    ) as tmp:
+        tmp_path = Path(tmp.name)
+    
+    try:
+    
+        imwrite(tmp_path,
+                img_array,
+                imagej=True,
+                metadata=metadata.imagej_meta,
+                resolution=metadata.resolution,
+                predictor=predictor,
+                extratags=metadata.extratags,
+                compression=compression,
+        )
+        tmp_path.replace(save_path)
+        logger.debug(f"Saved TIFF file at {save_path} with metadata: {metadata}")
+    except Exception as e:
+        tmp_path.unlink(missing_ok=True)
+        logger.error(f"Failed to save TIFF file at {save_path}: {e}")
+        raise

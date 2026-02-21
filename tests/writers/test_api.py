@@ -17,14 +17,11 @@ from fits_io.writers import api
 # High-level: convert_to_fits_tif()
 # -----------------------------------
 
-def test_convert_to_fits_tif_skips_if_already_converted(writer_harness, dummy_reader) -> None:
-    writer_harness.already_converted = True
+def test_convert_to_fits_tif_returns_output_paths(writer_harness, dummy_reader) -> None:
+    out = api.convert_to_fits_tif(dummy_reader)
 
-    out = api.convert_to_fits_tif(dummy_reader, overwrite=False)
-
-    # per writer.py: returns save_dirs (not save paths) when skipping
-    assert out == writer_harness.save_dirs
-    assert writer_harness.saved == []
+    assert out == [writer_harness.save_dirs[0] / "fits.tif"]
+    assert len(writer_harness.saved) == 1
 
 
 def test_convert_to_fits_tif_writes_one_file_per_series(writer_harness, dummy_reader) -> None:
@@ -40,7 +37,6 @@ def test_convert_to_fits_tif_writes_one_file_per_series(writer_harness, dummy_re
         dummy_reader,
         output_name="fits.tif",
         compression="zlib",
-        overwrite=True,
     )
 
     assert out_paths == [s1 / "fits.tif", s2 / "fits.tif"]

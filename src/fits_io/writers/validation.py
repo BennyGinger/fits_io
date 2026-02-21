@@ -6,32 +6,6 @@ from typing import Sequence
 logger = logging.getLogger(__name__)
 
 
-def _series_has_outputs(save_dir: Path, expected_filenames: set[str]) -> bool:
-    """Check if a given series directory contains converted FITS arrays.
-    
-    Args:
-        save_dir: Path to the series directory.
-        expected_filenames: Set of expected output filenames for the series, e.g. {"array.tif", "array_zproj.tif"}.
-    Returns:
-        True if the directory exists and contains at least one file, False otherwise.
-    """
-    if not save_dir.is_dir():
-        return False
-    
-    return any((save_dir / name).is_file() for name in expected_filenames)
-
-def image_converted(save_dirs: list[Path], expected_filenames: set[str]) -> bool:
-    """
-    Check if all series of an image have been converted and saved.
-    Args:
-        save_dirs: List of Paths to the series directories of an image.
-        expected_filenames: Set of expected output filenames for each series, e.g. {"array.tif", "array_zproj.tif"}.
-        
-    Returns:
-        True if all series directories exist and contain converted FITS arrays, False otherwise.
-    """
-    return all(_series_has_outputs(d, expected_filenames) for d in save_dirs)
-
 def resolve_channel_labels(channel_labels: str | Sequence[str] | None, n_channels: int, export_channels: str | Sequence[str]) -> tuple[list[str], bool]:
     """
     Resolve the channel labels to export based on the original channel labels from the reader and the requested export channels. Handles cases where channel labels are not provided, where all channels are requested, and where specific channels are requested but not found in the original labels.

@@ -21,7 +21,7 @@ def encode_metadata(payload: Mapping[str, Any]) -> ExtraTags | None:
         return [(FITS_TAG, "B", len(raw), raw, True)]
     return None
 
-def update_metadata(original_meta: Mapping[str, Any], *, update_meta: Mapping[str, Any] | None, step_name: str, z_projection: Zproj, status: StatusFlag) -> dict[str, Any]:
+def update_metadata(original_meta: Mapping[str, Any], *, update_meta: Mapping[str, Any] | None, user_name: str, step_name: str, z_projection: Zproj, status: StatusFlag) -> dict[str, Any]:
     """
     Update original metadata dictionary with values from update_meta.
     Args:
@@ -37,6 +37,7 @@ def update_metadata(original_meta: Mapping[str, Any], *, update_meta: Mapping[st
     meta = dict(update_meta) if update_meta else {}
     
     # Add status and projection
+    out['user_name'] = user_name
     out['status'] = status
     out['z_projection_method'] = z_projection
     

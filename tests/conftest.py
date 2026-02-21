@@ -526,7 +526,6 @@ def writer_harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> WriterHar
     monkeypatch.setattr(writer_mod, "get_save_dirs", lambda _r: h.save_dirs)
     monkeypatch.setattr(writer_mod, "mkdirs_paths", lambda dirs: dirs)
     monkeypatch.setattr(writer_mod, "build_output_path", lambda d, *, save_name: d / save_name)
-    monkeypatch.setattr(writer_mod, "image_converted", lambda _dirs, _expected: h.already_converted)
 
     monkeypatch.setattr(
         writer_mod,
