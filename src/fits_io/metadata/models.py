@@ -111,6 +111,7 @@ class InfoSummary:
         info.append(f"z_projection: {z_proj}")
         
         meta.pop('status', None)
+        meta.pop('user_name', None)
         if not meta:
             return "\n".join(info) + "\n" + "\n"
         
