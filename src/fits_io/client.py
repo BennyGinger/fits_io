@@ -1,11 +1,12 @@
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 from numpy.typing import NDArray
 
 from fits_io.readers.protocol import ImageReader
-from fits_io.readers._types import ExtTags, StatusFlag, Zproj
+from fits_io.readers._types import ArrAxis, ExtTags, StatusFlag, Zproj
 from fits_io.readers.factory import get_reader
+from fits_io.readers import array_utils
 from fits_io.writers.api import convert_to_fits_tif, save_fits_array, set_channel_labels, set_status, DEFAULT_OUTPUT_NAME
 from fits_io.writers.filesystem import get_save_dirs
 
@@ -26,6 +27,14 @@ class FitsIO:
     def from_path(cls, path: str | Path, channel_labels: list[str] | None = None) -> 'FitsIO':
         reader = get_reader(path, channel_labels=channel_labels)
         return cls(reader)
+    
+    @property
+    def axes(self) -> list[str]:
+        """
+        Returns the axis order as a list of strings e.g. ['TZCYX'].
+        For multi-series files, returns one string per series.
+        """
+        return self.reader.axes
     
     @property
     def fits_metadata(self) -> Mapping[str, Any]:
@@ -148,6 +157,52 @@ class FitsIO:
                         user_defined_metadata=user_metadata, 
                         z_projection=z_projection, 
                         compression=compression)
+    
+    def iter_frames_from_array(self, arr: NDArray, *, iterate_axis: ArrAxis = "T", axis_order: str | None = None, indices: Sequence[int] | None = None, zproj: Zproj = None) -> Iterator[NDArray]:
+        """
+        Iterate over frames along a specified axis, with optional z-projection.
+        
+        Args:
+            arr: Input array to iterate over.
+            iterate_axis: Single character representing the axis to iterate over (default "T").
+            axis_order: String describing the current axis order of arr. If None, uses self.axes[0].
+            indices: Optional sequence of indices to yield from the iteration axis.
+            zproj: Optional z-projection method ('max' or 'mean').
+        
+        Yields:
+            NDArray frames along the specified axis.
+        """
+        if axis_order is None:
+            axis_order = self.axes[0] if self.axes else "TYX"
+        
+        return array_utils.iter_frames(arr,
+                                       iterate_axis=iterate_axis,
+                                       axis_order=axis_order,
+                                       indices=indices,
+                                       zproj=zproj,
+        )
+    
+    def render_rgb_like_array(self, arr: NDArray, *, axis_order: str | None = None, channel_axis: ArrAxis = "C", target_channels: int = 3) -> NDArray:
+        """
+        Ensure an array has exactly target_channels channels.
+        
+        Args:
+            arr: Input array.
+            axis_order: String describing the current axis order of arr. If None, uses self.axes[0].
+            channel_axis: Single character representing the channel axis (default "C").
+            target_channels: Desired number of channels (default 3).
+        
+        Returns:
+            Array with exactly target_channels channels, preserving original axis layout.
+        """
+        if axis_order is None:
+            axis_order = self.axes[0] if self.axes else "CZYX"
+        
+        return array_utils.render_rgb_like_array(arr,
+                                                 axis_order=axis_order,
+                                                 channel_axis=channel_axis,
+                                                 target_channels=target_channels,
+                                                )
     
     def __getattr__(self, name: str) -> Any:
         return getattr(self.reader, name)

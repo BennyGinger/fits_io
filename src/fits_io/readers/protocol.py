@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from numpy.typing import NDArray
-import numpy as np
 
 from fits_io.readers._types import ArrAxis, PixelSize, StatusFlag, Zproj
 
@@ -116,25 +115,3 @@ class ImageReader(ABC):
     def get_channel(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> NDArray | list[NDArray]:
         """Return the selected channel(s) as a NumPy array or list of arrays. Channel can be specified by index or label."""
         ...
-
-    def apply_z_projection(self, arr: NDArray, z_axis: int | None, method: Zproj | None) -> NDArray:
-        """
-        Return array after applying z-projection along specified axis, if any and method given. Else return original array.
-        Args:
-            arr: Input array.
-            z_axis: Axis index corresponding to Z dimension.
-            method: Z-projection method to apply ('max', 'mean' or None).
-        Returns:
-            NDArray: Projected array or original array.
-        """
-        
-        
-        if z_axis is None or method is None:
-            return arr
-        
-        if method == 'max':
-            return np.max(arr, axis=z_axis)
-        elif method == 'mean':
-            return np.mean(arr, axis=z_axis)
-        else:
-            raise ValueError(f"Unsupported z-projection method: {method}")

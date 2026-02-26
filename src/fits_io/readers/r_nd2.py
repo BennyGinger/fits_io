@@ -8,11 +8,14 @@ from nd2.structures import Channel, ExpLoop, ChannelMeta, Volume
 import numpy as np
 from numpy.typing import NDArray
 
+from fits_io.readers.array_utils import apply_zproj
 from fits_io.readers.protocol import DEFAULT_FLAG, ImageReader
 from fits_io.readers._types import PixelSize, StatusFlag, Zproj, ArrAxis
 
 
 logger = logging.getLogger(__name__)
+
+
 
 @dataclass(slots=True)
 class Nd2Reader(ImageReader):
@@ -115,11 +118,11 @@ class Nd2Reader(ImageReader):
         z_axis = self.axis_index('Z')[0]
         
         if p_axis is None:
-            return self.apply_z_projection(arr, z_axis=z_axis, method=z_projection)
+            return apply_zproj(arr, z_axis=z_axis, zproj=z_projection)
 
         series_lst = np.split(arr, arr.shape[p_axis], axis=p_axis)
         arr_lst = [s.squeeze(axis=p_axis) for s in series_lst]
-        return [self.apply_z_projection(a, z_axis=z_axis, method=z_projection) for a in arr_lst]
+        return [apply_zproj(a, z_axis=z_axis, zproj=z_projection) for a in arr_lst]
     
     def _normalize_channels(self, channel: int | str | Sequence[int | str]) -> list[int]:
         req = [channel] if isinstance(channel, (int, str)) else list(channel)
@@ -165,8 +168,8 @@ class Nd2Reader(ImageReader):
         chan_arr = darr[tuple(slicer)].compute()
         
         if p_axis is None:
-            return self.apply_z_projection(chan_arr, z_axis=z_axis, method=z_projection)
+            return apply_zproj(chan_arr, z_axis=z_axis, zproj=z_projection)
         
         series_lst = np.split(chan_arr, chan_arr.shape[p_axis], axis=p_axis)
         arr_lst = [s.squeeze(axis=p_axis) for s in series_lst]
-        return [self.apply_z_projection(a, z_axis=z_axis, method=z_projection) for a in arr_lst]
+        return [apply_zproj(a, z_axis=z_axis, zproj=z_projection) for a in arr_lst]

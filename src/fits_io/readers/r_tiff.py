@@ -10,10 +10,12 @@ from numpy.typing import NDArray
 from tifffile import TiffFile, TiffPage, imread, COMPRESSION, TiffTag
 
 from fits_io.readers._types import ArrAxis, PixelSize, StatusFlag, Zproj
+from fits_io.readers.array_utils import apply_zproj
 from fits_io.readers.protocol import ALLOWED_FLAGS, DEFAULT_FLAG, ImageReader
 
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class TiffReader(ImageReader):
@@ -167,14 +169,14 @@ class TiffReader(ImageReader):
         if self.series_number == 1:
             z_axis = self.axis_index('Z')[0]
             arr = imread(self.img_path)
-            return self.apply_z_projection(arr, z_axis=z_axis, method=z_projection)
+            return apply_zproj(arr, z_axis=z_axis, zproj=z_projection)
         
         with TiffFile(self.img_path) as tif:
             out: list[NDArray] = []
             for i, s in enumerate(tif.series):
                 arr = s.asarray()
                 z_axis = self.axis_index('Z')[i]
-                z_arr = self.apply_z_projection(arr, z_axis=z_axis, method=z_projection)
+                z_arr = apply_zproj(arr, z_axis=z_axis, zproj=z_projection)
                 out.append(z_arr)
         return out
 
@@ -186,7 +188,7 @@ class TiffReader(ImageReader):
                 channel,
                 channel_labels=self.channel_labels,
                 series_index=0,)
-            return self.apply_z_projection(chan_arr, z_axis=z_axis, method=z_projection)
+            return apply_zproj(chan_arr, z_axis=z_axis, zproj=z_projection)
         
         chan_arr_lst = [read_tiff_channels(
                 self.img_path,
@@ -197,5 +199,5 @@ class TiffReader(ImageReader):
         
         for i, arr in enumerate(chan_arr_lst):
             z_axis = self.axis_index('Z')[i]
-            chan_arr_lst[i] = self.apply_z_projection(arr, z_axis=z_axis, method=z_projection)
+            chan_arr_lst[i] = apply_zproj(arr, z_axis=z_axis, zproj=z_projection)
         return chan_arr_lst

@@ -87,7 +87,7 @@ def read_tiff_channels(path: str | Path, channel: int | str | Sequence[int | str
 
         # enumerate pages
         mesh = np.meshgrid(*idx_grids, indexing="ij")
-        multi_idx = np.stack([m.ravel() for m in mesh], axis=0)
+        multi_idx = [m.ravel() for m in mesh]
         page_indices = np.ravel_multi_index(multi_idx, dims=page_shape, order="C")
 
         planes = tif.asarray(key=page_indices.tolist())  # (n_planes, Y, X)
