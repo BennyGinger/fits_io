@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 import logging
 
@@ -8,13 +9,11 @@ from nd2.structures import Channel, ExpLoop, ChannelMeta, Volume
 import numpy as np
 from numpy.typing import NDArray
 
-from fits_io.readers.array_utils import apply_zproj
 from fits_io.readers.protocol import DEFAULT_FLAG, ImageReader
 from fits_io.readers._types import PixelSize, StatusFlag, Zproj, ArrAxis
 
 
 logger = logging.getLogger(__name__)
-
 
 
 @dataclass(slots=True)
@@ -36,6 +35,10 @@ class Nd2Reader(ImageReader):
             meta = file.metadata
             self._channels = getattr(meta, 'channels', None)
             self._exploop = file.experiment
+            shape = getattr(file, "shape", None)
+            if shape is None:
+                shape = tuple(self._sizes.values())
+            self._shape = [tuple(shape)]
         
         self._validate_channel_label_override()
         if self._channel_labels is None:
@@ -44,6 +47,10 @@ class Nd2Reader(ImageReader):
     @property
     def axes(self) -> list[str]:
         return [self._axes.replace('P', '')]
+    
+    @property
+    def shape(self) -> list[tuple[int, ...]]:
+        return self._shape * self.series_number
     
     @property
     def compression_method(self) -> str | None:
@@ -112,17 +119,17 @@ class Nd2Reader(ImageReader):
         logger.warning(".nd2 file do not have custom metadata saved")
         return {}
     
-    def get_array(self, z_projection: Zproj = None) -> NDArray | list[NDArray]:
+    def get_array(self, z_projection: Zproj = None) -> NDArray[Any] | list[NDArray[Any]]:
         arr = nd2.imread(self.img_path)
         p_axis = self.axis_index('P')[0]
         z_axis = self.axis_index('Z')[0]
         
         if p_axis is None:
-            return apply_zproj(arr, z_axis=z_axis, zproj=z_projection)
+            return self.apply_zproj(arr, z_axis=z_axis, zproj=z_projection)
 
         series_lst = np.split(arr, arr.shape[p_axis], axis=p_axis)
         arr_lst = [s.squeeze(axis=p_axis) for s in series_lst]
-        return [apply_zproj(a, z_axis=z_axis, zproj=z_projection) for a in arr_lst]
+        return [self.apply_zproj(a, z_axis=z_axis, zproj=z_projection) for a in arr_lst]
     
     def _normalize_channels(self, channel: int | str | Sequence[int | str]) -> list[int]:
         req = [channel] if isinstance(channel, (int, str)) else list(channel)
@@ -150,7 +157,7 @@ class Nd2Reader(ImageReader):
                     raise ValueError(f"Unknown channel label {item!r}. Known: {labels}") from None
         return out
     
-    def get_channel(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> NDArray | list[NDArray]:
+    def get_channel(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> NDArray[Any] | list[NDArray[Any]]:
         # Get the different indexes and axes
         z_axis = self.axis_index('Z')[0]
         c_axis = self.axis_index('C')[0]
@@ -168,8 +175,8 @@ class Nd2Reader(ImageReader):
         chan_arr = darr[tuple(slicer)].compute()
         
         if p_axis is None:
-            return apply_zproj(chan_arr, z_axis=z_axis, zproj=z_projection)
+            return self.apply_zproj(chan_arr, z_axis=z_axis, zproj=z_projection)
         
         series_lst = np.split(chan_arr, chan_arr.shape[p_axis], axis=p_axis)
         arr_lst = [s.squeeze(axis=p_axis) for s in series_lst]
-        return [apply_zproj(a, z_axis=z_axis, zproj=z_projection) for a in arr_lst]
+        return [self.apply_zproj(a, z_axis=z_axis, zproj=z_projection) for a in arr_lst]

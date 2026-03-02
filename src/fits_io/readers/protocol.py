@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
+from collections.abc import Mapping, Sequence
 
+import numpy as np
 from numpy.typing import NDArray
 
 from fits_io.readers._types import ArrAxis, PixelSize, StatusFlag, Zproj
@@ -16,6 +18,7 @@ class ImageReader(ABC):
 
     img_path: Path
     _channel_labels: list[str] | None = field(default=None, kw_only=True)
+    _shape: list[tuple[int, ...]] = field(init=False)
     
     def _validate_channel_label_override(self) -> None:
         if self._channel_labels is None:
@@ -44,6 +47,12 @@ class ImageReader(ABC):
         ...
 
     @property
+    @abstractmethod
+    def shape(self) -> list[tuple[int, ...]]:
+        """Return the shape of the image data of each series."""
+        ...
+    
+    @property
     def channel_labels(self) -> list[str] | None:
         """User override if provided, otherwise subclass may return its own labels."""
         return self._channel_labels if self._channel_labels is not None else self._native_channel_labels()
@@ -57,6 +66,11 @@ class ImageReader(ABC):
     @abstractmethod
     def axes(self) -> list[str]:
         """Return the axes string for the image data"""
+        ...
+    
+    @abstractmethod
+    def axis_index(self, axis: ArrAxis) -> list[int | None]:
+        """Return the index of the specified axis for each series, or None if not present."""
         ...
     
     @property
@@ -83,11 +97,6 @@ class ImageReader(ABC):
         """Return the number of series in the image, or 1 if not applicable."""
         ...
     
-    @abstractmethod
-    def axis_index(self, axis: ArrAxis) -> list[int | None]:
-        """Return a list of indices of the specified axis, or None if not present, for each series."""
-        ...
-    
     @property
     @abstractmethod
     def resolution(self) -> list[PixelSize | None]:
@@ -107,11 +116,34 @@ class ImageReader(ABC):
         ...
     
     @abstractmethod
-    def get_array(self, z_projection: Zproj = None) -> NDArray | list[NDArray]:
+    def get_array(self, z_projection: Zproj = None) -> NDArray[Any] | list[NDArray[Any]]:
         """Return the image data as a NumPy array. If multiple series, return a list of arrays."""
         ...
     
     @abstractmethod
-    def get_channel(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> NDArray | list[NDArray]:
+    def get_channel(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> NDArray[Any] | list[NDArray[Any]]:
         """Return the selected channel(s) as a NumPy array or list of arrays. Channel can be specified by index or label."""
         ...
+
+    @staticmethod
+    def apply_zproj(arr: NDArray, z_axis: int | None, zproj: Zproj | None) -> NDArray:
+        """
+        Apply z-projection to an array along the specified axis.
+        
+        Args:
+            arr: Input array.
+            z_axis: Axis index for Z dimension.
+            zproj: Projection method ('max' or 'mean').
+        
+        Returns:
+            Projected array with Z dimension removed.
+        """
+        if z_axis is None or zproj is None:
+            return arr
+        
+        if zproj == 'max':
+            return np.max(arr, axis=z_axis)
+        elif zproj == 'mean':
+            return np.mean(arr, axis=z_axis)
+        else:
+            raise ValueError(f"Unsupported z-projection method: {zproj}")

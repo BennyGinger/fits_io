@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 from tifffile import TiffFile
 
 
-def read_tiff_channels(path: str | Path, channel: int | str | Sequence[int | str], *, channel_labels: Sequence[str] | None = None, series_index: int = 0,) -> NDArray:
+def read_tiff_channels(path: str | Path, channel: int | str | Sequence[int | str], *, channel_labels: Sequence[str] | None = None, series_index: int = 0,) -> NDArray[Any]:
     """
     Read one or more channels from a TIFF hyperstack stored as pages (e.g. TZCYX).
 

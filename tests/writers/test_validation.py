@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from fits_io.writers.validation import image_converted, resolve_channel_labels
+from fits_io.writers.validation import resolve_channel_labels
 
 
 # -----------------------------
@@ -78,64 +78,4 @@ def test_resolve_channel_labels_list_all_channels_exports_all_false():
     assert export_all is False
 
 
-# -----------------------------
-# image_converted tests
-# -----------------------------
 
-def test_image_converted_all_series_exist_with_files(tmp_path):
-    """All series directories exist and contain expected files."""
-    series1 = tmp_path / "s1"
-    series2 = tmp_path / "s2"
-    series1.mkdir()
-    series2.mkdir()
-    (series1 / "array.tif").touch()
-    (series2 / "array.tif").touch()
-    
-    assert image_converted([series1, series2], {"array.tif"}) is True
-
-
-def test_image_converted_some_series_missing(tmp_path):
-    """One series directory doesn't exist."""
-    series1 = tmp_path / "s1"
-    series2 = tmp_path / "s2"
-    series1.mkdir()
-    (series1 / "array.tif").touch()
-    # series2 not created
-    
-    assert image_converted([series1, series2], {"array.tif"}) is False
-
-
-def test_image_converted_series_exists_but_no_files(tmp_path):
-    """Series directory exists but doesn't contain expected files."""
-    series1 = tmp_path / "s1"
-    series1.mkdir()
-    # No files created
-    
-    assert image_converted([series1], {"array.tif"}) is False
-
-
-def test_image_converted_partial_files(tmp_path):
-    """One series has the file, another doesn't."""
-    series1 = tmp_path / "s1"
-    series2 = tmp_path / "s2"
-    series1.mkdir()
-    series2.mkdir()
-    (series1 / "array.tif").touch()
-    # series2 has no files
-    
-    assert image_converted([series1, series2], {"array.tif"}) is False
-
-
-def test_image_converted_multiple_expected_files_at_least_one_exists(tmp_path):
-    """When expecting multiple files, having at least one is sufficient."""
-    series1 = tmp_path / "s1"
-    series1.mkdir()
-    (series1 / "array.tif").touch()
-    # array_zproj.tif not created
-    
-    assert image_converted([series1], {"array.tif", "array_zproj.tif"}) is True
-
-
-def test_image_converted_empty_list_returns_true(tmp_path):
-    """Empty list of series should return True (vacuous truth)."""
-    assert image_converted([], {"array.tif"}) is True

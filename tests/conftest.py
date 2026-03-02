@@ -114,6 +114,12 @@ class DummyReader(ImageReader):
         return None
 
     @property
+    def shape(self) -> list[tuple[int, ...]]:
+        if isinstance(self.array, list):
+            return [arr.shape for arr in self.array]
+        return [self.array.shape] if self.array is not None else [(2, 3)]
+
+    @property
     def custom_metadata(self) -> Mapping[str, Any]:
         return {}
 

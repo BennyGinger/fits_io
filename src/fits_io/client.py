@@ -1,15 +1,18 @@
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any, TypeVar
+from collections.abc import  Mapping, Sequence
 
 from numpy.typing import NDArray
+import numpy as np
 
 from fits_io.readers.protocol import ImageReader
 from fits_io.readers._types import ArrAxis, ExtTags, StatusFlag, Zproj
 from fits_io.readers.factory import get_reader
-from fits_io.readers import array_utils
 from fits_io.writers.api import convert_to_fits_tif, save_fits_array, set_channel_labels, set_status, DEFAULT_OUTPUT_NAME
 from fits_io.writers.filesystem import get_save_dirs
 
+
+T = TypeVar('T', bound=np.generic)
 
 DISTRIBUTION_NAME = "fits-io"
 STEP_NAME = "convert"
@@ -35,6 +38,25 @@ class FitsIO:
         For multi-series files, returns one string per series.
         """
         return self.reader.axes
+    
+    @property
+    def shape(self) -> list[tuple[int, ...]]:
+        """
+        Returns the shape of the image data for each series as a list of tuples.
+        For multi-series files, returns one tuple per series.
+        """
+        return self.reader.shape
+    
+    def axis_index(self, axis: ArrAxis) -> list[int | None]:
+        """
+        Return the index of a given axis in the axis order string for each series (list).
+        
+        Args:
+            axis: Single character representing the axis to find.
+        Returns:
+            List of indices of the axis for each series, or None if not present.
+        """
+        return self.reader.axis_index(axis)
     
     @property
     def fits_metadata(self) -> Mapping[str, Any]:
@@ -91,7 +113,7 @@ class FitsIO:
         """
         return self.reader.get_array(z_projection=z_projection)
     
-    def get_channel_array(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> NDArray | list[NDArray]:
+    def get_channel_array(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> NDArray[Any] | list[NDArray[Any]]:
         """
         Returns the image data for a specific channel(s) as a NumPy array or a list of arrays for multi-series files.
         Args:
@@ -158,51 +180,7 @@ class FitsIO:
                         z_projection=z_projection, 
                         compression=compression)
     
-    def iter_frames_from_array(self, arr: NDArray, *, iterate_axis: ArrAxis = "T", axis_order: str | None = None, indices: Sequence[int] | None = None, zproj: Zproj = None) -> Iterator[NDArray]:
-        """
-        Iterate over frames along a specified axis, with optional z-projection.
-        
-        Args:
-            arr: Input array to iterate over.
-            iterate_axis: Single character representing the axis to iterate over (default "T").
-            axis_order: String describing the current axis order of arr. If None, uses self.axes[0].
-            indices: Optional sequence of indices to yield from the iteration axis.
-            zproj: Optional z-projection method ('max' or 'mean').
-        
-        Yields:
-            NDArray frames along the specified axis.
-        """
-        if axis_order is None:
-            axis_order = self.axes[0] if self.axes else "TYX"
-        
-        return array_utils.iter_frames(arr,
-                                       iterate_axis=iterate_axis,
-                                       axis_order=axis_order,
-                                       indices=indices,
-                                       zproj=zproj,
-        )
     
-    def render_rgb_like_array(self, arr: NDArray, *, axis_order: str | None = None, channel_axis: ArrAxis = "C", target_channels: int = 3) -> NDArray:
-        """
-        Ensure an array has exactly target_channels channels.
-        
-        Args:
-            arr: Input array.
-            axis_order: String describing the current axis order of arr. If None, uses self.axes[0].
-            channel_axis: Single character representing the channel axis (default "C").
-            target_channels: Desired number of channels (default 3).
-        
-        Returns:
-            Array with exactly target_channels channels, preserving original axis layout.
-        """
-        if axis_order is None:
-            axis_order = self.axes[0] if self.axes else "CZYX"
-        
-        return array_utils.render_rgb_like_array(arr,
-                                                 axis_order=axis_order,
-                                                 channel_axis=channel_axis,
-                                                 target_channels=target_channels,
-                                                )
     
     def __getattr__(self, name: str) -> Any:
         return getattr(self.reader, name)

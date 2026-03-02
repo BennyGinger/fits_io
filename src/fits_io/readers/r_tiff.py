@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence, cast
+from typing import Any, cast
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 import json
 import logging
@@ -10,17 +11,14 @@ from numpy.typing import NDArray
 from tifffile import TiffFile, TiffPage, imread, COMPRESSION, TiffTag
 
 from fits_io.readers._types import ArrAxis, PixelSize, StatusFlag, Zproj
-from fits_io.readers.array_utils import apply_zproj
 from fits_io.readers.protocol import ALLOWED_FLAGS, DEFAULT_FLAG, ImageReader
 
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class TiffReader(ImageReader):
     
-    _shape: list[tuple[int, ...]] = field(init=False)
     _axes: list[str] = field(init=False)
     # Series are handled as separate files internally, like a list of images, so no real axis
     _series_count: int = field(init=False)
@@ -112,6 +110,10 @@ class TiffReader(ImageReader):
         return self._axes
     
     @property
+    def shape(self) -> list[tuple[int, ...]]:
+        return self._shape
+    
+    @property
     def compression_method(self) -> str | None:
         # Not expecting multi-series with different compression when using this property
         return self._compression_method[0] 
@@ -165,22 +167,22 @@ class TiffReader(ImageReader):
     def custom_metadata(self) -> Mapping[str, Any]:
         return self._custom_metadata
     
-    def get_array(self, z_projection: Zproj = None) -> NDArray | list[NDArray]:
+    def get_array(self, z_projection: Zproj = None) -> NDArray[Any] | list[NDArray[Any]]:
         if self.series_number == 1:
             z_axis = self.axis_index('Z')[0]
             arr = imread(self.img_path)
-            return apply_zproj(arr, z_axis=z_axis, zproj=z_projection)
+            return self.apply_zproj(arr, z_axis=z_axis, zproj=z_projection)
         
         with TiffFile(self.img_path) as tif:
-            out: list[NDArray] = []
+            out: list[NDArray[Any]] = []
             for i, s in enumerate(tif.series):
                 arr = s.asarray()
                 z_axis = self.axis_index('Z')[i]
-                z_arr = apply_zproj(arr, z_axis=z_axis, zproj=z_projection)
+                z_arr = self.apply_zproj(arr, z_axis=z_axis, zproj=z_projection)
                 out.append(z_arr)
         return out
 
-    def get_channel(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> NDArray | list[NDArray]:
+    def get_channel(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> NDArray[Any] | list[NDArray[Any]]:
         if self.series_number == 1:
             z_axis = self.axis_index('Z')[0]
             chan_arr = read_tiff_channels(
@@ -188,7 +190,7 @@ class TiffReader(ImageReader):
                 channel,
                 channel_labels=self.channel_labels,
                 series_index=0,)
-            return apply_zproj(chan_arr, z_axis=z_axis, zproj=z_projection)
+            return self.apply_zproj(chan_arr, z_axis=z_axis, zproj=z_projection)
         
         chan_arr_lst = [read_tiff_channels(
                 self.img_path,
@@ -199,5 +201,5 @@ class TiffReader(ImageReader):
         
         for i, arr in enumerate(chan_arr_lst):
             z_axis = self.axis_index('Z')[i]
-            chan_arr_lst[i] = apply_zproj(arr, z_axis=z_axis, zproj=z_projection)
+            chan_arr_lst[i] = self.apply_zproj(arr, z_axis=z_axis, zproj=z_projection)
         return chan_arr_lst
