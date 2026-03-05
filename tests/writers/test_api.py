@@ -61,7 +61,7 @@ def test_save_fits_array_raises_on_multi_series(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setattr(builder, "build_metadata", lambda *args, **kwargs: SimpleNamespace(imagej_meta={}, resolution=None, extratags=[]))
     
     with pytest.raises(ValueError, match="Multiple series detected"):
-        api.save_fits_array(dummy_reader)
+        api.export_source_array(dummy_reader)
 
 
 # -----------------------------------

@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DISTRIBUTION = 'unknown_distribution'
 
-def build_metadata(img_reader: ImageReader, *, distribution: str | None = None, step_name: str | None = None, channel_labels: str | Sequence[str] | None = None, z_projection: Zproj = None, extra_step_metadata: Mapping[str, Any] | None = None, add_step_meta: bool = True, new_status: StatusFlag | None = None, new_user: str | None = None, series_index: int = 0) -> TiffMetadata:
+def build_metadata(img_reader: ImageReader, *, distribution: str | None = None, step_name: str | None = None, channel_labels: str | Sequence[str] | None = None, z_projection: Zproj = None, extra_step_metadata: Mapping[str, Any] | None = None, add_step_meta: bool = True, new_status: StatusFlag | None = None, new_user: str | None = None, series_index: int = 0, axis_order: str | None = None) -> TiffMetadata:
     """
     Build ImageJ-compatible metadata for saving TIFF files.
     
@@ -27,6 +27,7 @@ def build_metadata(img_reader: ImageReader, *, distribution: str | None = None, 
         new_status: Optional; if provided, overrides the status in the metadata.
         user_name: Optional, if provided, name of the user performing the conversion.
         series_index: Optional; index of the series to use for multi-series images, purely to save appropriate metadata.
+        axis_order: Optional; if provided, use this axis order in the metadata instead of the one from the reader. This can be useful if the axis order has been changed due to channel subsetting or z-projection.
     
     Returns:
         TiffMetadata object containing metadata, resolution, and extra tags.
@@ -47,7 +48,7 @@ def build_metadata(img_reader: ImageReader, *, distribution: str | None = None, 
     logger.debug(f"Validated channel labels: {chosen_labels}, number of channels: {n_channels}")
     
     # Determine axes string for metadata, adjusting for z-projection and channel export
-    axes = img_reader.axes[series_index]
+    axes = axis_order if axis_order is not None else img_reader.axes[series_index]
     if z_projection is not None:
         axes = axes.replace('Z', '')  # drop Z axis if z-projection is applied
     if n_channels == 1:

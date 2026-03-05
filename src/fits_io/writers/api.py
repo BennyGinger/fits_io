@@ -3,6 +3,8 @@ from typing import Mapping, Sequence, Any
 import logging
 from functools import partial
 
+from numpy.typing import NDArray
+
 from fits_io.readers._types import StatusFlag, Zproj
 from fits_io.readers.protocol import ImageReader, ALLOWED_FLAGS
 from fits_io.readers.factory import get_reader
@@ -20,7 +22,7 @@ DEFAULT_OUTPUT_NAME = 'fits.tif'
 
 
 
-def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', distribution: str | None = None, step_name: str | None = None, output_name: str = DEFAULT_OUTPUT_NAME, channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib') -> list[Path]:
+def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', distribution: str | None = None, step_name: str | None = None, output_name: str = DEFAULT_OUTPUT_NAME, channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', custom_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib') -> list[Path]:
     """
     Convert an image file to a FITS TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
     Args:
@@ -31,7 +33,7 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
         output_name : Optional name of the output TIFF file.
         channel_labels : Optional labels for source channels (used for mapping), if None, default labels will be used. 
         export_channels : Subset channels to export. Can be 'all' or a list of channel labels, by default 'all'
-        user_defined_metadata : Additional custom metadata to include in the TIFF file, by default None
+        custom_metadata : Additional custom metadata to include in the TIFF file, by default None
         z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
         compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'.
     Returns:
@@ -58,7 +60,7 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
                         step_name=step_name,
                         channel_labels=used_channels,
                         z_projection=z_projection,
-                        extra_step_metadata=user_defined_metadata)
+                        extra_step_metadata=custom_metadata)
     
     # Write FITS TIFF with metadata and reader
     if len(arrays) != len(save_path_lst):
@@ -71,32 +73,46 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
         save_tiff(array, path, meta, compression=compression)
     return save_path_lst
 
-def save_fits_array(img_reader: ImageReader, *, distribution: str | None = None, step_name: str | None = None, output_name: str = DEFAULT_OUTPUT_NAME, user_defined_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib') -> None:
-    """Save the FITS array from an ImageReader instance to a TIFF file with ImageJ metadata.
+def save_array(img_reader: ImageReader, array: NDArray[Any], axis_order: str, channel_labels: str | Sequence[str], output_name: str = DEFAULT_OUTPUT_NAME, *, user_name: str = "unknown", distribution: str | None = None, step_name: str | None = None, custom_metadata: Mapping[str, Any] | None = None, compression: str | None = "zlib", ) -> Path:
+    """
+    Save a given array as a FITS TIFF file with ImageJ metadata, using the input image's path as reference and transfer of metadata.
+    
+    Note: this function won't apply any z-projection, channel label resolution, or provenance tag management. It will simply save the provided array with metadata built from the input image and provided parameters.
     
     Args:
-        img_reader : An ImageReader instance for the input image.
-        distribution : Name of the distribution or package.
-        step_name : Name of the processing step.
+        img_reader : An ImageReader instance for the input image, used to access the original image path and metadata.
+        array : The image array to be saved as a TIFF file.
+        axis_order : Axis order of the input array, used for building correct metadata. Can raise an error in Tifffile if not provided correctly.
+        channel_labels : Labels for the channels in the input array, used for building metadata. This should match the channels in the input array and can be a single string for one channel or a sequence of strings for multiple channels.
         output_name : Optional name of the output TIFF file. If None, uses 'fits.tif' by default.
-        user_defined_metadata : Additional custom metadata to include in the TIFF file, by default None
-        compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'
+        user_name : Name of the user performing the save operation, by default "unknown".
+        distribution : Name of the distribution or package, by default None.
+        step_name : Name of the processing step, by default None.
+        custom_metadata : Additional custom metadata to include in the TIFF file, by default None.
+        compression : Compression method to use for the TIFF file. If None, no compression is applied, by default "zlib".
+    
+    Returns:
+        Path of the saved TIFF file.
     """
-    # get metadata
-    meta = build_metadata(img_reader, 
-                          distribution=distribution,
-                          step_name=step_name,
-                          extra_step_metadata=user_defined_metadata)
+    save_path = img_reader.img_path.with_name(output_name)
+
+    metadata = build_metadata(
+                img_reader,
+                distribution=distribution,
+                step_name=step_name,
+                new_user=user_name,
+                extra_step_metadata=custom_metadata,
+                axis_order=axis_order,
+                channel_labels=channel_labels)
+
+    # Check comperssion method
+    if compression is None:
+        current_compression = img_reader.compression_method
+    else:
+        current_compression = compression
     
-    # Generate save path
-    save_dir = img_reader.img_path.parent
-    save_path = build_output_path(save_dir, save_name=output_name)
-    array = img_reader.get_array(z_projection)
-    
-    if isinstance(array, list):
-        raise ValueError("Multiple series detected; use convert_to_fits_tif.")
-    
-    save_tiff(array, save_path, meta, compression=compression)
+    save_tiff(array, save_path, metadata, compression=current_compression)
+    return save_path
 
 def set_status(img_reader: ImageReader, status: StatusFlag) -> None:
     """
@@ -157,6 +173,34 @@ def set_channel_labels(img_reader: ImageReader, channel_labels: str | Sequence[s
     
     save_tiff(array, img_reader.img_path, meta, compression=compression)  
 
+def apply_zproj(img_reader: ImageReader, z_projection: Zproj = None) -> None:
+    """
+    Apply z-projection to the image array and update the file with the projected array and updated metadata.
+    
+    Policy:
+    - This function will apply the specified z-projection to the existing array in the file, and re-save it with updated metadata. So, no change to channel labels, status, compression or provenance tag is applied here.
+    - Multi-series inputs are not supported here by design.
+    
+    Args:
+        img_reader : An ImageReader instance for the input image.
+        z_projection : The z-projection method to apply ('max', 'mean', or None). If None, no projection is applied.
+    """
+    if not isinstance(img_reader, TiffReader):
+        raise TypeError("apply_zproj only supports .tif/.tiff files.")
+    
+    # Get existing metadata to preserve other fields
+    meta = build_metadata(img_reader,
+                          z_projection=z_projection,
+                          add_step_meta=False)
+    
+    array = img_reader.get_array(z_projection)
+    
+    compression = img_reader.compression_method
+    
+    if isinstance(array, list):
+        raise ValueError("Expected a single array, but got multiple series. You may need to use convert_to_fits_tif instead.")
+    
+    save_tiff(array, img_reader.img_path, meta, compression=compression)
 
 
 if __name__ == '__main__':
