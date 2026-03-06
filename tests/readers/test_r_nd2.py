@@ -89,3 +89,23 @@ def test_nd2_normalize_channels_label_not_supported(monkeypatch, tmp_path, fake_
     r = Nd2Reader(p)  # no channel_labels provided
     with pytest.raises(ValueError, match="does not support native channel labels"):
         r._normalize_channels("DAPI")
+
+
+def test_nd2_axes_repeated_per_series(monkeypatch, tmp_path: Path, fake_nd2_file_basic):
+    p = tmp_path / "x.nd2"
+    p.write_bytes(b"fake")
+    monkeypatch.setattr(nd2, "ND2File", fake_nd2_file_basic)
+
+    r = Nd2Reader(p)
+    assert r.series_number == 2
+    assert r.axes == ["TZCYX", "TZCYX"]
+
+
+def test_nd2_resolution_repeated_per_series(monkeypatch, tmp_path: Path, fake_nd2_file_basic):
+    p = tmp_path / "x.nd2"
+    p.write_bytes(b"fake")
+    monkeypatch.setattr(nd2, "ND2File", fake_nd2_file_basic)
+
+    r = Nd2Reader(p)
+    assert r.series_number == 2
+    assert r.resolution == [(0.3223, 0.3223), (0.3223, 0.3223)]

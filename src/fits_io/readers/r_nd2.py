@@ -46,7 +46,8 @@ class Nd2Reader(ImageReader):
     
     @property
     def axes(self) -> list[str]:
-        return [self._axes.replace('P', '')]
+        axes = self._axes.replace('P', '')
+        return [axes] * self.series_number
     
     @property
     def shape(self) -> list[tuple[int, ...]]:
@@ -87,21 +88,23 @@ class Nd2Reader(ImageReader):
             
     @property
     def resolution(self) -> list[PixelSize | None]:
+        n_series = self.series_number
         if self._channels is None:
-            return [None]
+            return [None] * n_series
         
         ch0 = self._channels[0]
         vol: Volume | None = getattr(ch0, "volume", None)
         if vol is None:
-            return [None]
+            return [None] * n_series
 
         # (x, y, z)
         calib: tuple[float, float, float] | None = getattr(vol, "axesCalibration", None)
         if not calib:
-            return [None]
+            return [None] * n_series
 
         x_um_per_pix, y_um_per_pix = calib[:2]
-        return [(round(float(x_um_per_pix), 4), round(float(y_um_per_pix), 4))]
+        value = (round(float(x_um_per_pix), 4), round(float(y_um_per_pix), 4))
+        return [value] * n_series
         
     @property
     def interval(self) -> float | None:
