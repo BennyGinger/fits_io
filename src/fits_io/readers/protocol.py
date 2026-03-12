@@ -81,6 +81,12 @@ class ImageReader(ABC):
     
     @property
     @abstractmethod
+    def zproj_method(self) -> Zproj:
+        """Return the z-projection method applied to the image data, or None if not applicable."""
+        ...
+    
+    @property
+    @abstractmethod
     def status(self) -> StatusFlag:
         """Return the status of the image for downstream processing (i.e., 'active' or 'skip')."""
         ...

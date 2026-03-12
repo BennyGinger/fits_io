@@ -1,10 +1,6 @@
 # tests/test_writer.py
 from __future__ import annotations
 
-from pathlib import Path
-from types import SimpleNamespace
-from typing import Any
-
 import numpy as np
 import pytest
 
@@ -49,19 +45,15 @@ def test_convert_to_fits_tif_writes_one_file_per_series(writer_harness, dummy_re
 
 
 # -----------------------------------
-# save_fits_array()
+# apply_zproj()
 # -----------------------------------
 
-def test_save_fits_array_raises_on_multi_series(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dummy_reader) -> None:
-    """Test that save_fits_array raises ValueError for multi-series."""
-    # Make dummy_reader return list of arrays (multi-series)
+def test_apply_zproj_raises_on_multi_series(writer_harness_tiff, dummy_reader) -> None:
+    """Test that apply_zproj raises ValueError for multi-series."""
     dummy_reader.array = [np.ones((3, 3), dtype=np.uint8), np.ones((3, 3), dtype=np.uint8)]
-    
-    from fits_io.metadata import builder
-    monkeypatch.setattr(builder, "build_metadata", lambda *args, **kwargs: SimpleNamespace(imagej_meta={}, resolution=None, extratags=[]))
-    
-    with pytest.raises(ValueError, match="Multiple series detected"):
-        api.export_source_array(dummy_reader)
+
+    with pytest.raises(ValueError, match="Expected a single array"):
+        api.apply_zproj(dummy_reader, "max")
 
 
 # -----------------------------------

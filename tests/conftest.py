@@ -84,6 +84,10 @@ class DummyReader(ImageReader):
         return None
 
     @property
+    def zproj_method(self) -> Zproj:
+        return None
+
+    @property
     def status(self) -> StatusFlag:
         return "active"
 

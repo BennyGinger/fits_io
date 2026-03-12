@@ -119,6 +119,10 @@ class TiffReader(ImageReader):
         return self._compression_method[0] 
     
     @property
+    def zproj_method(self) -> Zproj:
+        return self._custom_metadata.get("z_projection_method", None)
+    
+    @property
     def status(self) -> StatusFlag:
         return self._status
     

@@ -96,11 +96,13 @@ def save_array(img_reader: ImageReader, array: NDArray[Any], axis_order: str, ch
     """
     save_path = img_reader.img_path.with_name(output_name)
 
+    zproj = img_reader.zproj_method
     metadata = build_metadata(
                 img_reader,
                 distribution=distribution,
                 step_name=step_name,
                 new_user=user_name,
+                z_projection=zproj,
                 extra_step_metadata=custom_metadata,
                 axis_order=axis_order,
                 channel_labels=channel_labels)

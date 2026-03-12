@@ -122,6 +122,11 @@ class Nd2Reader(ImageReader):
         logger.warning(".nd2 file do not have custom metadata saved")
         return {}
     
+    @property
+    def zproj_method(self) -> Zproj:
+        logger.warning(".nd2 files do not have z-projection method metadata; returning None")
+        return None
+    
     def get_array(self, z_projection: Zproj = None) -> NDArray[Any] | list[NDArray[Any]]:
         arr = nd2.imread(self.img_path)
         p_axis = self.axis_index('P')[0]
