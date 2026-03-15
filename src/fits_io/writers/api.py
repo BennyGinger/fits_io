@@ -1,14 +1,15 @@
 from pathlib import Path
 from typing import Mapping, Sequence, Any
 import logging
-from functools import partial
 
 from numpy.typing import NDArray
 
+from fits_io.metadata.context import resolve_build_context
+from fits_io.metadata.imagej import build_tiff_metadata
+from fits_io.metadata.private import build_private_payload
 from fits_io.readers._types import StatusFlag, Zproj
 from fits_io.readers.protocol import ImageReader, ALLOWED_FLAGS
 from fits_io.readers.factory import get_reader
-from fits_io.metadata.builder import build_metadata
 from fits_io.readers.r_tiff import TiffReader
 from fits_io.writers.validation import resolve_channel_labels
 from fits_io.writers.filesystem import get_save_dirs, build_output_path, mkdirs_paths
@@ -19,6 +20,7 @@ from fits_io.writers.utils import get_array_to_export
 logger = logging.getLogger(__name__)
 
 DEFAULT_OUTPUT_NAME = 'fits.tif'
+
 
 
 
@@ -52,23 +54,14 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
     # Get the image array(s)
     arrays = get_array_to_export(img_reader, used_channels, export_all_flag, z_projection)
     
-    # Prepare metadata
-    build_md = partial(build_metadata,
-                        img_reader,
-                        new_user=user_name,
-                        distribution=distribution,
-                        step_name=step_name,
-                        channel_labels=used_channels,
-                        z_projection=z_projection,
-                        extra_step_metadata=custom_metadata)
-    
     # Write FITS TIFF with metadata and reader
     if len(arrays) != len(save_path_lst):
         raise ValueError(f"Got {len(arrays)} arrays but {len(save_path_lst)} save paths")
 
     for i, (array, path) in enumerate(zip(arrays, save_path_lst)):
-        # finish building metadata
-        meta = build_md(series_index=i)
+        ctx = resolve_build_context(img_reader, step_name=step_name, channel_labels=used_channels, z_projection=z_projection, new_user=user_name, series_index=i)
+        payload = build_private_payload(ctx, distribution=distribution, extra_step_metadata=custom_metadata, z_projection=z_projection)
+        meta = build_tiff_metadata(ctx, payload)
         # save TIFF
         save_tiff(array, path, meta, compression=compression)
     return save_path_lst
@@ -97,15 +90,9 @@ def save_array(img_reader: ImageReader, array: NDArray[Any], axis_order: str, ch
     save_path = img_reader.img_path.with_name(output_name)
 
     zproj = img_reader.zproj_method
-    metadata = build_metadata(
-                img_reader,
-                distribution=distribution,
-                step_name=step_name,
-                new_user=user_name,
-                z_projection=zproj,
-                extra_step_metadata=custom_metadata,
-                axis_order=axis_order,
-                channel_labels=channel_labels)
+    ctx = resolve_build_context(img_reader, step_name=step_name, channel_labels=channel_labels, z_projection=zproj, new_user=user_name, axis_order=axis_order)
+    payload = build_private_payload(ctx, distribution=distribution, extra_step_metadata=custom_metadata, z_projection=zproj)
+    metadata = build_tiff_metadata(ctx, payload)
 
     # Check comperssion method
     if compression is None:
@@ -133,9 +120,9 @@ def set_status(img_reader: ImageReader, status: StatusFlag) -> None:
     if status not in ALLOWED_FLAGS:
         raise ValueError(f"Invalid status: {status}. Must be one of {ALLOWED_FLAGS}")
     
-    meta = build_metadata(img_reader,
-                          add_step_meta=False,
-                          new_status=status)
+    ctx = resolve_build_context(img_reader, new_status=status)
+    payload = build_private_payload(ctx, add_step_meta=False)
+    meta = build_tiff_metadata(ctx, payload)
     
     array = img_reader.get_array()
     
@@ -162,9 +149,9 @@ def set_channel_labels(img_reader: ImageReader, channel_labels: str | Sequence[s
         raise TypeError("set_channel_labels only supports .tif/.tiff files.")
     
     # Get existing metadata to preserve other fields
-    meta = build_metadata(img_reader,
-                          channel_labels=channel_labels,
-                          add_step_meta=False)
+    ctx = resolve_build_context(img_reader, channel_labels=channel_labels)
+    payload = build_private_payload(ctx, add_step_meta=False)
+    meta = build_tiff_metadata(ctx, payload)
     
     array = img_reader.get_array()
     
@@ -191,9 +178,9 @@ def apply_zproj(img_reader: ImageReader, z_projection: Zproj = None) -> None:
         raise TypeError("apply_zproj only supports .tif/.tiff files.")
     
     # Get existing metadata to preserve other fields
-    meta = build_metadata(img_reader,
-                          z_projection=z_projection,
-                          add_step_meta=False)
+    ctx = resolve_build_context(img_reader, z_projection=z_projection)
+    payload = build_private_payload(ctx, add_step_meta=False, z_projection=z_projection)
+    meta = build_tiff_metadata(ctx, payload)
     
     array = img_reader.get_array(z_projection)
     

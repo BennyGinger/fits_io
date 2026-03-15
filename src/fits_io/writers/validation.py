@@ -41,11 +41,7 @@ def resolve_channel_labels(channel_labels: str | Sequence[str] | None, n_channel
         export_all_flag = False
         
         if any(ch not in labels for ch in requested):
-            logger.warning(
-                "Requested export channels %s should be in channel labels %s; falling back to all.",
-                requested,
-                labels,
-            )
+            logger.warning("Requested export channels %s should be in channel labels %s; falling back to all.", requested, labels)
             out_channel = labels
             export_all_flag = True
         else:

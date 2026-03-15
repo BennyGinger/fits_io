@@ -548,11 +548,19 @@ def writer_harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> WriterHar
         lambda _r, _used, _flag, _zp: h.arrays,
     )
 
-    def fake_build_metadata(*args: Any, **kwargs: Any) -> Any:
+    def fake_resolve_build_context(*args: Any, **kwargs: Any) -> Any:
         h.md_calls.append(kwargs)
-        return h.make_meta(**kwargs)
+        return SimpleNamespace(kwargs=kwargs)
 
-    monkeypatch.setattr(writer_mod, "build_metadata", fake_build_metadata)
+    def fake_build_private_payload(ctx: Any, **kwargs: Any) -> Any:
+        return {"ctx": ctx, "kwargs": kwargs}
+
+    def fake_build_tiff_metadata(ctx: Any, payload: Any) -> Any:
+        return h.make_meta(ctx=ctx, payload=payload)
+
+    monkeypatch.setattr(writer_mod, "resolve_build_context", fake_resolve_build_context)
+    monkeypatch.setattr(writer_mod, "build_private_payload", fake_build_private_payload)
+    monkeypatch.setattr(writer_mod, "build_tiff_metadata", fake_build_tiff_metadata)
 
     def fake_save_tiff(array: NDArray, path: Path, meta: Any, *, compression: str | None = "zlib") -> None:
         h.saved.append({"array": array, "path": path, "meta": meta, "compression": compression})
