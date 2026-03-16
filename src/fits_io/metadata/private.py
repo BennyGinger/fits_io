@@ -35,13 +35,17 @@ def get_status(original_meta: Mapping[str, Any]) -> StatusFlag:
     status = original_meta.get('status', DEFAULT_FLAG)
     return status if status in ALLOWED_FLAGS else DEFAULT_FLAG
 
-def build_private_payload(ctx: MetadataBuildContext, *, distribution: str | None = None, extra_step_metadata: Mapping[str, Any] | None = None, add_step_meta: bool = True, z_projection: Zproj = None) -> dict[str, Any]:
+def build_private_payload(ctx: MetadataBuildContext, *, add_step_meta: bool = True, distribution: str | None = None, extra_step_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None) -> dict[str, Any]:
     """
-    Build the final private metadata payload from resolved context and call-time payload options."""
+    Build the final private metadata payload from resolved context and call-time payload options.
+    """
     payload = dict(ctx.base_payload)
     if add_step_meta:
         dist = distribution or DEFAULT_DISTRIBUTION
         payload = add_provenance_profile(payload, distribution=dist, step_name=ctx.step_name)
+    if ctx.source_channel_indices is not None:
+        payload['source_channel_indices'] = ctx.source_channel_indices
+        payload['source_channel_count'] = ctx.source_channel_count
     return _update_metadata(payload, update_meta=extra_step_metadata, user_name=ctx.user_name, step_name=ctx.step_name, z_projection=z_projection, status=ctx.status)
 
 def _update_metadata(original_meta: Mapping[str, Any], *, update_meta: Mapping[str, Any] | None, user_name: str, step_name: str, z_projection: Zproj, status: StatusFlag) -> dict[str, Any]:
@@ -53,9 +57,24 @@ def _update_metadata(original_meta: Mapping[str, Any], *, update_meta: Mapping[s
     out['z_projection_method'] = z_projection
     if not meta:
         return out
-    if step_name in out:
-        out[step_name].update(meta)
-    else:
-        out[step_name] = meta
+    out[step_name] = _merge_step_metadata(out.get(step_name), meta)
     return out
 
+def _merge_step_metadata(existing_step_meta: Any, update_meta: Mapping[str, Any]) -> dict[str, Any]:
+    merged = dict(existing_step_meta) if isinstance(existing_step_meta, Mapping) else {}
+
+    if 'channels' in update_meta:
+        new_channels = update_meta.get('channels')
+        if isinstance(new_channels, Mapping):
+            existing_channels = merged.get('channels')
+            merged_channels = dict(existing_channels) if isinstance(existing_channels, Mapping) else {}
+            merged_channels.update(dict(new_channels))
+            merged['channels'] = merged_channels
+        else:
+            merged['channels'] = new_channels
+
+    for key, value in update_meta.items():
+        if key == 'channels':
+            continue
+        merged[key] = value
+    return merged

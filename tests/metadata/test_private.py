@@ -49,3 +49,39 @@ def test_build_private_payload_with_provenance_adds_profile_fields():
     assert 'dist' in out['test_step']
     assert 'version' in out['test_step']
     assert 'timestamp' in out['test_step']
+
+
+def test_build_private_payload_creates_first_segment_channel_entry():
+    ctx = MetadataBuildContext(n_channels=1, labels=['GFP'], axes='TYX', base_payload={'existing': 'data'}, step_name='segment', status='active', user_name='test_user', interval=11.0, resolution=(0.5, 0.25))
+    out = build_private_payload(ctx, distribution='test-dist', add_step_meta=True, extra_step_metadata={'channels': {'1': {'backend': 'v4'}}})
+    assert out['segment']['channels'] == {'1': {'backend': 'v4'}}
+    assert out['segment']['dist'] == 'test-dist'
+    assert out['segment']['version']
+    assert out['segment']['timestamp']
+
+
+def test_build_private_payload_preserves_existing_segment_channels_when_adding_new_one():
+    ctx = MetadataBuildContext(n_channels=1, labels=['RFP'], axes='TYX', base_payload={'segment': {'channels': {'1': {'model_name': 'old-gfp'}}, 'legacy': 'keep-me'}}, step_name='segment', status='active', user_name='test_user', interval=11.0, resolution=(0.5, 0.25))
+    out = build_private_payload(ctx, distribution='test-dist', add_step_meta=True, extra_step_metadata={'channels': {'2': {'model_name': 'new-rfp'}}})
+    assert out['segment']['channels'] == {'1': {'model_name': 'old-gfp'}, '2': {'model_name': 'new-rfp'}}
+    assert out['segment']['legacy'] == 'keep-me'
+
+
+def test_build_private_payload_updates_only_requested_segment_channel():
+    ctx = MetadataBuildContext(n_channels=1, labels=['GFP'], axes='TYX', base_payload={'segment': {'channels': {'1': {'model_name': 'old-gfp'}, '2': {'model_name': 'keep-rfp'}}}}, step_name='segment', status='active', user_name='test_user', interval=11.0, resolution=(0.5, 0.25))
+    out = build_private_payload(ctx, distribution='test-dist', add_step_meta=True, extra_step_metadata={'channels': {'1': {'model_name': 'new-gfp'}}})
+    assert out['segment']['channels'] == {'1': {'model_name': 'new-gfp'}, '2': {'model_name': 'keep-rfp'}}
+
+
+def test_build_private_payload_sets_source_channel_identity_when_provided():
+    ctx = MetadataBuildContext(n_channels=2, labels=['GFP', 'RFP'], axes='TZCYX', base_payload={'existing': 'data'}, step_name='test_step', status='active', user_name='test_user', interval=11.0, resolution=(0.5, 0.25), source_channel_indices=[1, 2], source_channel_count=3)
+    out = build_private_payload(ctx, add_step_meta=False)
+    assert out['source_channel_indices'] == [1, 2]
+    assert out['source_channel_count'] == 3
+
+
+def test_build_private_payload_preserves_existing_source_channel_identity_when_not_provided():
+    ctx = MetadataBuildContext(n_channels=2, labels=['GFP', 'RFP'], axes='TZCYX', base_payload={'existing': 'data', 'source_channel_indices': [0, 2], 'source_channel_count': 3}, step_name='test_step', status='active', user_name='test_user', interval=11.0, resolution=(0.5, 0.25))
+    out = build_private_payload(ctx, add_step_meta=False)
+    assert out['source_channel_indices'] == [0, 2]
+    assert out['source_channel_count'] == 3

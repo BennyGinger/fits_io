@@ -6,7 +6,7 @@ from typing import Sequence
 logger = logging.getLogger(__name__)
 
 
-def resolve_channel_labels(channel_labels: str | Sequence[str] | None, n_channels: int, export_channels: str | Sequence[str]) -> tuple[list[str], bool]:
+def resolve_channel_labels(channel_labels: str | Sequence[str] | None, n_channels: int, export_channels: str | Sequence[str]) -> tuple[list[str], list[int], bool]:
     """
     Resolve the channel labels to export based on the original channel labels from the reader and the requested export channels. Handles cases where channel labels are not provided, where all channels are requested, and where specific channels are requested but not found in the original labels.
     
@@ -16,14 +16,15 @@ def resolve_channel_labels(channel_labels: str | Sequence[str] | None, n_channel
         export_channels: The channels requested for export (can be "all", a single string, or a sequence of strings).
     
     Returns:
-        A tuple of (resolved_channel_labels, export_all_flag) where resolved_channel_labels is a list of channel labels to export and export_all_flag is a boolean indicating if all channels are being exported
+        A tuple of (resolved_channel_labels, resolved_indices, export_all_flag) where resolved_channel_labels is a list of channel labels to export, resolved_indices is a list of source channel indices, and export_all_flag is a boolean indicating if all channels are being exported
     """
     
     if channel_labels is None:
         out_channel = [f"C_{i+1}" for i in range(n_channels)]
+        indices = list(range(n_channels))
         export_all_flag = True
-        logger.debug(f"No channel_labels provided; using default labels {out_channel} and export flag {export_all_flag}")
-        return out_channel, export_all_flag
+        logger.debug("Resolved export channels: labels=%s indices=%s export_all=%s", out_channel, indices, export_all_flag)
+        return out_channel, indices, export_all_flag
 
     if isinstance(channel_labels, str):
         labels = [channel_labels]
@@ -35,6 +36,7 @@ def resolve_channel_labels(channel_labels: str | Sequence[str] | None, n_channel
     
     if isinstance(export_channels, str) and export_channels.lower() == "all":
         out_channel = labels
+        indices = list(range(n_channels))
         export_all_flag = True
     else:
         requested = [export_channels] if isinstance(export_channels, str) else list(export_channels)
@@ -43,8 +45,10 @@ def resolve_channel_labels(channel_labels: str | Sequence[str] | None, n_channel
         if any(ch not in labels for ch in requested):
             logger.warning("Requested export channels %s should be in channel labels %s; falling back to all.", requested, labels)
             out_channel = labels
+            indices = list(range(n_channels))
             export_all_flag = True
         else:
             out_channel = requested
-    logger.debug(f"Resolved channel labels for export: {out_channel} from original {channel_labels} with export_all_flag set to {export_all_flag}")
-    return out_channel, export_all_flag
+            indices = [labels.index(ch) for ch in requested]
+    logger.debug("Resolved export channels: labels=%s indices=%s export_all=%s", out_channel, indices, export_all_flag)
+    return out_channel, indices, export_all_flag

@@ -24,9 +24,11 @@ class MetadataBuildContext:
     user_name: str
     interval: float | None
     resolution: tuple[float, float] | None
+    source_channel_indices: list[int] | None = None
+    source_channel_count: int | None = None
 
 
-def resolve_build_context(img_reader: ImageReader, *, step_name: str | None = None, channel_labels: str | Sequence[str] | None = None, z_projection: Zproj = None, new_status: StatusFlag | None = None, new_user: str | None = None, series_index: int = 0, axis_order: str | None = None) -> MetadataBuildContext:
+def resolve_build_context(img_reader: ImageReader, *, step_name: str | None = None, channel_labels: str | Sequence[str] | None = None, z_projection: Zproj = None, new_status: StatusFlag | None = None, new_user: str | None = None, series_index: int = 0, axis_order: str | None = None, source_channel_indices: list[int] | None = None, source_channel_count: int | None = None) -> MetadataBuildContext:
     """
     Resolve normalized metadata context without mutating payload or building TIFF metadata.
     """
@@ -46,4 +48,6 @@ def resolve_build_context(img_reader: ImageReader, *, step_name: str | None = No
                                 status=status, 
                                 user_name=user_name, 
                                 interval=img_reader.interval, 
-                                resolution=img_reader.resolution[series_index])
+                                resolution=img_reader.resolution[series_index],
+                                source_channel_indices=source_channel_indices, 
+                                source_channel_count=source_channel_count)

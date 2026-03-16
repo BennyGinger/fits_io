@@ -44,6 +44,23 @@ def test_convert_to_fits_tif_writes_one_file_per_series(writer_harness, dummy_re
     assert [kw.get("series_index") for kw in writer_harness.md_calls] == [0, 1]
 
 
+def test_convert_to_fits_tif_sets_source_channel_identity_for_all_channels(writer_harness, dummy_reader) -> None:
+    writer_harness.used_channels = ["C_1", "C_2", "C_3"]
+    writer_harness.used_indices = [0, 1, 2]
+    api.convert_to_fits_tif(dummy_reader)
+    assert writer_harness.md_calls[0]["source_channel_count"] == 3
+    assert writer_harness.md_calls[0]["source_channel_indices"] == [0, 1, 2]
+
+
+def test_convert_to_fits_tif_sets_source_channel_identity_for_subset(writer_harness, dummy_reader) -> None:
+    writer_harness.used_channels = ["GFP", "RFP"]
+    writer_harness.used_indices = [1, 2]
+    writer_harness.export_all_flag = False
+    api.convert_to_fits_tif(dummy_reader, channel_labels=["DAPI", "GFP", "RFP"], export_channels=["GFP", "RFP"])
+    assert writer_harness.md_calls[0]["source_channel_count"] == 3
+    assert writer_harness.md_calls[0]["source_channel_indices"] == [1, 2]
+
+
 # -----------------------------------
 # apply_zproj()
 # -----------------------------------
@@ -87,6 +104,8 @@ def test_set_status_sets_valid_status(writer_harness_tiff, dummy_reader) -> None
     # Check that save_tiff was called
     assert len(writer_harness_tiff.saved) == 1
     assert writer_harness_tiff.saved[0]["path"] == dummy_reader.img_path
+    assert "source_channel_indices" not in writer_harness_tiff.md_calls[0]
+    assert "source_channel_count" not in writer_harness_tiff.md_calls[0]
 
 
 # -----------------------------------
@@ -114,3 +133,12 @@ def test_set_channel_labels_sets_valid_labels(writer_harness_tiff, dummy_reader)
     # Check that save_tiff was called
     assert len(writer_harness_tiff.saved) == 1
     assert writer_harness_tiff.saved[0]["path"] == dummy_reader.img_path
+    assert "source_channel_indices" not in writer_harness_tiff.md_calls[0]
+    assert "source_channel_count" not in writer_harness_tiff.md_calls[0]
+
+
+def test_apply_zproj_does_not_explicitly_set_source_channel_identity(writer_harness_tiff, dummy_reader) -> None:
+    api.apply_zproj(dummy_reader, "max")
+    assert len(writer_harness_tiff.saved) == 1
+    assert "source_channel_indices" not in writer_harness_tiff.md_calls[0]
+    assert "source_channel_count" not in writer_harness_tiff.md_calls[0]

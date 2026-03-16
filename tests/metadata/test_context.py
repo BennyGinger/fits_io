@@ -62,3 +62,10 @@ def test_resolve_build_context_uses_series_index():
     assert ctx.axes == 'TCYX'
     assert ctx.n_channels == 3
     assert ctx.resolution == (0.3, 0.3)
+
+
+def test_resolve_build_context_passes_through_source_channel_identity():
+    reader = ReaderStub(channel_number=[3], channel_labels=['C_1', 'C_2', 'C_3'])
+    ctx = resolve_build_context(cast(ImageReader, reader), source_channel_indices=[1, 2], source_channel_count=3)
+    assert ctx.source_channel_indices == [1, 2]
+    assert ctx.source_channel_count == 3

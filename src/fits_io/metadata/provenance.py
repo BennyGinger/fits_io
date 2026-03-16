@@ -28,11 +28,11 @@ def add_provenance_profile(custom_metadata: Mapping[str, Any], *, distribution: 
         """
     
     out = dict(custom_metadata)
-    
-    out[step_name] = {
-        "dist": distribution,
-        "version": _get_dist_version(distribution),
-        "timestamp": _utc_now(),
-        }
+    existing_step_meta = out.get(step_name)
+    step_meta = dict(existing_step_meta) if isinstance(existing_step_meta, Mapping) else {}
+    step_meta["dist"] = distribution
+    step_meta["version"] = _get_dist_version(distribution)
+    step_meta["timestamp"] = _utc_now()
+    out[step_name] = step_meta
     return out
 

@@ -49,8 +49,8 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
     save_path_lst = [build_output_path(save_dir, save_name=output_name) for save_dir in save_dirs]
     
     # Set default channel labels to be initialized if user did not provide any
-    used_channels, export_all_flag = resolve_channel_labels(channel_labels, img_reader.channel_number[0], export_channels)
-    
+    used_channels, source_channel_indices, export_all_flag = resolve_channel_labels(channel_labels, img_reader.channel_number[0], export_channels)
+
     # Get the image array(s)
     arrays = get_array_to_export(img_reader, used_channels, export_all_flag, z_projection)
     
@@ -59,7 +59,8 @@ def convert_to_fits_tif(img_reader: ImageReader, *, user_name: str = 'unknown', 
         raise ValueError(f"Got {len(arrays)} arrays but {len(save_path_lst)} save paths")
 
     for i, (array, path) in enumerate(zip(arrays, save_path_lst)):
-        ctx = resolve_build_context(img_reader, step_name=step_name, channel_labels=used_channels, z_projection=z_projection, new_user=user_name, series_index=i)
+        source_channel_count = img_reader.channel_number[i] if i < len(img_reader.channel_number) else img_reader.channel_number[0]
+        ctx = resolve_build_context(img_reader, step_name=step_name, channel_labels=used_channels, z_projection=z_projection, new_user=user_name, series_index=i, source_channel_indices=source_channel_indices, source_channel_count=source_channel_count)
         payload = build_private_payload(ctx, distribution=distribution, extra_step_metadata=custom_metadata, z_projection=z_projection)
         meta = build_tiff_metadata(ctx, payload)
         # save TIFF
@@ -90,8 +91,16 @@ def save_array(img_reader: ImageReader, array: NDArray[Any], axis_order: str, ch
     save_path = img_reader.img_path.with_name(output_name)
 
     zproj = img_reader.zproj_method
-    ctx = resolve_build_context(img_reader, step_name=step_name, channel_labels=channel_labels, z_projection=zproj, new_user=user_name, axis_order=axis_order)
-    payload = build_private_payload(ctx, distribution=distribution, extra_step_metadata=custom_metadata, z_projection=zproj)
+    ctx = resolve_build_context(img_reader, 
+                                step_name=step_name, 
+                                channel_labels=channel_labels, 
+                                z_projection=zproj, 
+                                new_user=user_name, 
+                                axis_order=axis_order)
+    payload = build_private_payload(ctx, 
+                                    distribution=distribution, 
+                                    extra_step_metadata=custom_metadata, 
+                                    z_projection=zproj)
     metadata = build_tiff_metadata(ctx, payload)
 
     # Check comperssion method

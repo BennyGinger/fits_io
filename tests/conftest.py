@@ -516,6 +516,7 @@ class WriterHarness:
     already_converted: bool = False
 
     used_channels: list[str] = field(default_factory=lambda: ["C_1"])
+    used_indices: list[int] = field(default_factory=lambda: [0])
     export_all_flag: bool = True
     arrays: list[NDArray] = field(default_factory=lambda: [np.ones((2, 2), dtype=np.uint8)])
 
@@ -540,7 +541,7 @@ def writer_harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> WriterHar
     monkeypatch.setattr(
         writer_mod,
         "resolve_channel_labels",
-        lambda _labels, _n, _export: (h.used_channels, h.export_all_flag),
+        lambda _labels, _n, _export: (h.used_channels, h.used_indices, h.export_all_flag),
     )
     monkeypatch.setattr(
         writer_mod,

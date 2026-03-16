@@ -13,28 +13,23 @@ from fits_io.writers.validation import resolve_channel_labels
 # -----------------------------
 
 def test_resolve_channel_labels_none_defaults_and_exports_all_flag_true():
-    labels, export_all = resolve_channel_labels(
-        channel_labels=None, n_channels=3, export_channels="all"
-    )
+    labels, indices, export_all = resolve_channel_labels(channel_labels=None, n_channels=3, export_channels="all")
     assert labels == ["C_1", "C_2", "C_3"]
+    assert indices == [0, 1, 2]
     assert export_all is True
 
 
 def test_resolve_channel_labels_str_single_channel_ok_and_all_exports():
-    labels, export_all = resolve_channel_labels(
-        channel_labels="RFP", n_channels=1, export_channels="all"
-    )
+    labels, indices, export_all = resolve_channel_labels(channel_labels="RFP", n_channels=1, export_channels="all")
     assert labels == ["RFP"]
+    assert indices == [0]
     assert export_all is True
 
 
 def test_resolve_channel_labels_list_subset_success():
-    labels, export_all = resolve_channel_labels(
-        channel_labels=["GFP", "RFP"],
-        n_channels=2,
-        export_channels=["RFP"],
-    )
+    labels, indices, export_all = resolve_channel_labels(channel_labels=["GFP", "RFP"], n_channels=2, export_channels=["RFP"])
     assert labels == ["RFP"]
+    assert indices == [1]
     assert export_all is False
 
 
@@ -58,23 +53,17 @@ def test_resolve_channel_labels_wrong_type_channel_labels_raises():
 
 def test_resolve_channel_labels_fallback_when_requested_not_in_labels():
     """When requested channels are not in labels, fallback to all channels with warning."""
-    labels, export_all = resolve_channel_labels(
-        channel_labels=["GFP", "RFP"],
-        n_channels=2,
-        export_channels=["BFP"],  # not in labels
-    )
+    labels, indices, export_all = resolve_channel_labels(channel_labels=["GFP", "RFP"], n_channels=2, export_channels=["BFP"])
     assert labels == ["GFP", "RFP"]
+    assert indices == [0, 1]
     assert export_all is True
 
 
 def test_resolve_channel_labels_list_all_channels_exports_all_false():
     """When explicitly listing all channels, export_all should be False."""
-    labels, export_all = resolve_channel_labels(
-        channel_labels=["GFP", "RFP", "BFP"],
-        n_channels=3,
-        export_channels=["GFP", "RFP", "BFP"],
-    )
+    labels, indices, export_all = resolve_channel_labels(channel_labels=["GFP", "RFP", "BFP"], n_channels=3, export_channels=["GFP", "RFP", "BFP"])
     assert labels == ["GFP", "RFP", "BFP"]
+    assert indices == [0, 1, 2]
     assert export_all is False
 
 
