@@ -109,6 +109,15 @@ class InfoSummary:
         meta = dict(self.current_meta).copy()
         z_proj = meta.pop('z_projection_method', 'None')
         info.append(f"z_projection: {z_proj}")
+        src_idxs = meta.pop('source_channel_indices', None)
+        if src_idxs is not None:
+            info.append(f"source channel indices: {src_idxs}")
+        src_count = meta.pop('source_channel_count', None)
+        if src_count is not None:
+            info.append(f"source channel count: {src_count}")
+        mask_src_idxs = meta.pop('mask_source_channel_indices', None)
+        if mask_src_idxs is not None:
+            info.append(f"mask source channel indices: {mask_src_idxs}")
         
         meta.pop('status', None)
         meta.pop('user_name', None)
@@ -117,8 +126,8 @@ class InfoSummary:
         
         info.append("\n--- Processed Step ---\n")
         for k, v in meta.items():
-            timestamp = v.get('timestamp', "unknown") if isinstance(v, Mapping) else "unknown"
-            line = f"{k}: with time stamp of {timestamp}"
+            timestamp = v.get('timestamp', "unknown timestamp") if isinstance(v, Mapping) else "unknown timestamp"
+            line = f"'{k.capitalize()}': on the {timestamp}"
             info.append(line)
         
         return "\n".join(info) + "\n" + "\n"

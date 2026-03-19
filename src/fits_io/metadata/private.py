@@ -52,6 +52,9 @@ def _update_metadata(original_meta: Mapping[str, Any], *, update_meta: Mapping[s
     """Merge step metadata and enforce top-level private metadata policy keys."""
     out = dict(original_meta)
     meta = dict(update_meta) if update_meta else {}
+    for key in ('source_channel_indices', 'source_channel_count', 'mask_source_channel_indices'):
+        if key in meta:
+            out[key] = meta.pop(key)
     out['user_name'] = user_name
     out['status'] = status
     out['z_projection_method'] = z_projection
