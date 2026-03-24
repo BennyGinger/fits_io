@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from tifffile import TiffFile
 
-
+# BUG: If only one channel in the array, just silently load the array, and not raise because there's no 'C' axis. 
 def read_tiff_channels(path: str | Path, channel: int | str | Sequence[int | str], *, channel_labels: Sequence[str] | None = None, series_index: int = 0,) -> NDArray[Any]:
     """
     Read one or more channels from a TIFF hyperstack stored as pages (e.g. TZCYX).
