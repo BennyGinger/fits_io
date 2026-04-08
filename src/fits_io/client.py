@@ -170,7 +170,7 @@ class FitsIO:
                             compression=compression)
         return save_paths
 
-    def save_array(self, array: NDArray, axis_order: str, channel_labels: str | Sequence[str], output_name: str = DEFAULT_OUTPUT_NAME, user_name: str = "unknown", distribution: str | None = None, step_name: str | None = None, custom_metadata: Mapping[str, Any] | None = None, compression: str | None = 'zlib') -> Path:
+    def save_array(self, array: NDArray, axis_order: str, channel_labels: str | Sequence[str] | None, output_name: str = DEFAULT_OUTPUT_NAME, user_name: str = "unknown", distribution: str | None = None, step_name: str | None = None, custom_metadata: Mapping[str, Any] | None = None, compression: str | None = 'zlib') -> Path:
         """
         Save a given array as a FITS TIFF file with ImageJ metadata, using the input image's path as reference and transfer of metadata.
     
