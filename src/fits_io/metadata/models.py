@@ -1,10 +1,11 @@
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
+import json
 
 import numpy as np
 from numpy.typing import NDArray
 
-from fits_io.readers._types import ExtraTags, PixelDensity, PixelSize, StatusFlag
+from fits_io.readers._types import ExtraTags, PixelDensity, PixelSize
 from fits_io.metadata.lut import LABEL_TO_COLOR, COLOR_MAP, make_color_lut
 
 
@@ -85,50 +86,85 @@ class ChannelMeta:
 
 @dataclass(slots=True, frozen=True)
 class InfoSummary: 
-    status: StatusFlag
-    user_name: str
-    chosen_labels: list[str] | None
-    current_meta: Mapping[str, Any] | None
+    payload: Mapping[str, Any] | None
+
+    @staticmethod
+    def _toml_value(value: Any) -> str:
+        if isinstance(value, str):
+            return json.dumps(value, ensure_ascii=False)
+        if isinstance(value, bool):
+            return 'true' if value else 'false'
+        if value is None:
+            return 'null'
+        if isinstance(value, (int, float)):
+            return str(value)
+        if isinstance(value, tuple):
+            return json.dumps(list(value), ensure_ascii=False)
+        if isinstance(value, list):
+            return json.dumps(value, ensure_ascii=False)
+        return json.dumps(str(value), ensure_ascii=False)
+
+    @classmethod
+    def _append_toml_sections(cls, lines: list[str], section: str, value: Mapping[str, Any]) -> None:
+        lines.append(f"[{section}]")
+        for key, child in value.items():
+            if isinstance(child, Mapping):
+                continue
+            lines.append(f"{key} = {cls._toml_value(child)}")
+        lines.append("")
+        for key, child in value.items():
+            if isinstance(child, Mapping):
+                cls._append_toml_sections(lines, f"{section}.{key}", child)
     
     def render(self) -> str:
         delimiter = "----------------------"
         info = [
         delimiter,
-        "FITS PIPELINE METADATA",
+        "FITS METADATA",
         delimiter + "\n",
-        f"status: {self.status}",
-        f"user: {self.user_name}",
         ]
 
-        labels = "unknown" if self.chosen_labels is None else self.chosen_labels
-        info.append(f"channel labels: {labels}")
-        
-        if self.current_meta is None:
+        if self.payload is None:
             return "\n".join(info) + "\n" + "\n"
         
-        meta = dict(self.current_meta).copy()
-        z_proj = meta.pop('z_projection_method', 'None')
-        info.append(f"z_projection: {z_proj}")
-        src_idxs = meta.pop('source_channel_indices', None)
-        if src_idxs is not None:
-            info.append(f"source channel indices: {src_idxs}")
-        src_count = meta.pop('source_channel_count', None)
-        if src_count is not None:
-            info.append(f"source channel count: {src_count}")
-        mask_src_idxs = meta.pop('mask_source_channel_indices', None)
-        if mask_src_idxs is not None:
-            info.append(f"mask source channel indices: {mask_src_idxs}")
-        
-        meta.pop('status', None)
-        meta.pop('user_name', None)
-        if not meta:
-            return "\n".join(info) + "\n" + "\n"
-        
-        info.append("\n--- Processed Step ---\n")
-        for k, v in meta.items():
-            timestamp = v.get('timestamp', "unknown timestamp") if isinstance(v, Mapping) else "unknown timestamp"
-            line = f"'{k.capitalize()}': on the {timestamp}"
-            info.append(line)
+        fits_meta = self.payload.get("fits_io", {})
+        if isinstance(fits_meta, Mapping):
+            info.append(f"fits_io version = {fits_meta.get('version', 'unknown')}")
+
+            axes = fits_meta.get("axes")
+            if axes is not None:
+                info.append(f"axes = {axes}")
+
+            z_proj = fits_meta.get("z_projection")
+            if z_proj is not None:
+                info.append(f"z_projection = {z_proj}")
+
+            compression = fits_meta.get("compression")
+            if compression is not None:
+                info.append(f"compression = {compression}")
+
+            labels = fits_meta.get("channel_labels")
+            if labels is not None:
+                info.append(f"channel labels = {labels}")
+
+            src_idxs = fits_meta.get("source_channel_indices")
+            if src_idxs is not None:
+                info.append(f"source channel indices = {src_idxs}")
+
+            src_count = fits_meta.get("source_channel_count")
+            if src_count is not None:
+                info.append(f"source channel count = {src_count}")
+
+        project_meta = self.payload.get("project_metadata", {})
+        if isinstance(project_meta, Mapping) and project_meta:
+            info.append("\n--- Project Metadata ---\n")
+            for key, value in project_meta.items():
+                info.append("---")
+                if isinstance(value, Mapping):
+                    self._append_toml_sections(info, key, value)
+                else:
+                    info.append(f"{key} = {self._toml_value(value)}")
+                    info.append("")
         
         return "\n".join(info) + "\n" + "\n"
             

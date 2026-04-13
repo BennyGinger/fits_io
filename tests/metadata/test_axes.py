@@ -1,4 +1,4 @@
-from fits_io.metadata.axes import resolve_axes
+from fits_io.metadata.arrays import resolve_axes
 
 
 def test_resolve_axes_prefers_explicit_axis_order():

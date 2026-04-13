@@ -7,10 +7,7 @@ from collections.abc import Mapping, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from fits_io.readers._types import ArrAxis, PixelSize, StatusFlag, Zproj
-
-DEFAULT_FLAG: StatusFlag = "active"
-ALLOWED_FLAGS: set[StatusFlag] = {"active", "skip"}
+from fits_io.readers._types import ArrAxis, PixelSize, Zproj
 
 @dataclass
 class ImageReader(ABC):
@@ -83,12 +80,6 @@ class ImageReader(ABC):
     @abstractmethod
     def zproj_method(self) -> Zproj:
         """Return the z-projection method applied to the image data, or None if not applicable."""
-        ...
-    
-    @property
-    @abstractmethod
-    def status(self) -> StatusFlag:
-        """Return the status of the image for downstream processing (i.e., 'active' or 'skip')."""
         ...
     
     @property

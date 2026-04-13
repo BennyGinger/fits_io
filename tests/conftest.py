@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping, Sequence, Callable
 
-from fits_io.readers._types import ArrAxis, StatusFlag, Zproj
+from fits_io.readers._types import ArrAxis, Zproj
 import numpy as np
 import pytest
 from numpy.typing import NDArray
@@ -86,10 +86,6 @@ class DummyReader(ImageReader):
     @property
     def zproj_method(self) -> Zproj:
         return None
-
-    @property
-    def status(self) -> StatusFlag:
-        return "active"
 
     @property
     def export_status(self) -> str:
@@ -272,11 +268,11 @@ def fake_tiff_file_with_info() -> Callable[[Path], FakeTiff]:
 def fake_tiff_file_with_status() -> Callable[[Path], FakeTiff]:
     def _factory(path: Path):
         import json
-        from fits_io.metadata.provenance import FITS_TAG
+        from fits_io.metadata.codec import FITS_TAG
         
         tags = [
             FakeTag("Compression", 1),
-            FakeTag("CustomTag", json.dumps({"status": "skip"}).encode("utf-8"), code=FITS_TAG)
+            FakeTag("CustomTag", json.dumps({"fits_io": {"z_projection": "mean"}}).encode("utf-8"), code=FITS_TAG)
         ]
         return FakeTiff(axes="YX", shape=(5, 6), tags=tags, imagej_metadata={})
     return _factory
@@ -304,11 +300,11 @@ def fake_tiff_file_with_label_list() -> Callable[[Path], FakeTiff]:
 def fake_tiff_file_with_custom_meta() -> Callable[[Path], FakeTiff]:
     def _factory(path: Path):
         import json
-        from fits_io.metadata.provenance import FITS_TAG
+        from fits_io.metadata.codec import FITS_TAG
         
         tags = [
             FakeTag("Compression", 1),
-            FakeTag("CustomTag", json.dumps({"status": "active", "extra": "data"}).encode("utf-8"), code=FITS_TAG)
+            FakeTag("CustomTag", json.dumps({"fits_io": {"z_projection": "max"}, "extra": "data"}).encode("utf-8"), code=FITS_TAG)
         ]
         return FakeTiff(axes="YX", shape=(5, 6), tags=tags, imagej_metadata={})
     return _factory
@@ -549,19 +545,27 @@ def writer_harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> WriterHar
         lambda _r, _used, _flag, _zp: h.arrays,
     )
 
-    def fake_resolve_build_context(*args: Any, **kwargs: Any) -> Any:
-        h.md_calls.append(kwargs)
-        return SimpleNamespace(kwargs=kwargs)
+    def fake_meta_orchestration(_reader: Any, **kwargs: Any) -> Any:
+        context_kwargs = {
+            "channel_labels": kwargs.get("channel_labels"),
+            "z_projection": kwargs.get("z_projection"),
+            "series_index": kwargs.get("series_index", 0),
+            "axis_order": kwargs.get("axis_order"),
+            "source_channel_indices": kwargs.get("source_channel_indices"),
+            "source_channel_count": kwargs.get("source_channel_count"),
+        }
+        context_kwargs = {k: v for k, v in context_kwargs.items() if v is not None or k == "series_index"}
+        h.md_calls.append(dict(context_kwargs))
+        payload = {
+            "ctx": SimpleNamespace(kwargs=context_kwargs),
+            "kwargs": {
+                "project_metadata": kwargs.get("project_metadata"),
+                "z_projection": kwargs.get("z_projection"),
+            },
+        }
+        return h.make_meta(ctx=SimpleNamespace(kwargs=context_kwargs), payload=payload)
 
-    def fake_build_private_payload(ctx: Any, **kwargs: Any) -> Any:
-        return {"ctx": ctx, "kwargs": kwargs}
-
-    def fake_build_tiff_metadata(ctx: Any, payload: Any) -> Any:
-        return h.make_meta(ctx=ctx, payload=payload)
-
-    monkeypatch.setattr(writer_mod, "resolve_build_context", fake_resolve_build_context)
-    monkeypatch.setattr(writer_mod, "build_private_payload", fake_build_private_payload)
-    monkeypatch.setattr(writer_mod, "build_tiff_metadata", fake_build_tiff_metadata)
+    monkeypatch.setattr(writer_mod, "meta_orchestration", fake_meta_orchestration)
 
     def fake_save_tiff(array: NDArray, path: Path, meta: Any, *, compression: str | None = "zlib") -> None:
         h.saved.append({"array": array, "path": path, "meta": meta, "compression": compression})
@@ -574,7 +578,7 @@ def writer_harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> WriterHar
 def writer_harness_tiff(monkeypatch: pytest.MonkeyPatch, writer_harness: WriterHarness, dummy_reader: DummyReader) -> WriterHarness:
     """
     Same harness, but makes DummyReader pass the `isinstance(..., TiffReader)` guard
-    used in set_status/set_channel_labels. :contentReference[oaicite:2]{index=2}
+    used in metadata-rewrite helpers.
     """
     import fits_io.writers.api as writer_mod
     monkeypatch.setattr(writer_mod, "TiffReader", type(dummy_reader))

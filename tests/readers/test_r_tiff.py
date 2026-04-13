@@ -69,22 +69,22 @@ def test_tiff_parse_info_no_info(tmp_path: Path, fake_tiff_file_no_series, monke
     assert info == {}
 
 
-def test_tiff_status_from_custom_metadata(tmp_path: Path, fake_tiff_file_with_status, monkeypatch):
+def test_tiff_zproj_from_fits_io_metadata(tmp_path: Path, fake_tiff_file_with_status, monkeypatch):
     p = tmp_path / "x.tif"
     p.write_bytes(b"fake")
     monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_with_status)
     
     r = TiffReader(p)
-    assert r.status == "skip"
+    assert r.zproj_method == "mean"
 
 
-def test_tiff_status_default(tmp_path: Path, fake_tiff_file_no_series, monkeypatch):
+def test_tiff_zproj_default_none(tmp_path: Path, fake_tiff_file_no_series, monkeypatch):
     p = tmp_path / "x.tif"
     p.write_bytes(b"fake")
     monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_no_series)
     
     r = TiffReader(p)
-    assert r.status == "active"
+    assert r.zproj_method is None
 
 
 def test_tiff_channel_labels_string(tmp_path: Path, fake_tiff_file_with_single_label, monkeypatch):
@@ -120,7 +120,7 @@ def test_tiff_custom_metadata_valid_json(tmp_path: Path, fake_tiff_file_with_cus
     monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_with_custom_meta)
     
     r = TiffReader(p)
-    assert r.custom_metadata == {"status": "active", "extra": "data"}
+    assert r.custom_metadata == {"fits_io": {"z_projection": "max"}, "extra": "data"}
 
 
 def test_tiff_custom_metadata_no_tag(tmp_path: Path, fake_tiff_file_no_series, monkeypatch):
@@ -177,6 +177,19 @@ def test_tiff_get_array_with_z_projection_max(tmp_path: Path, fake_tiff_file_no_
     assert out.shape == (3, 4)  # Z axis removed
     # Check that max projection worked
     assert out[0, 0] == 2  # max of [1, 2]
+
+
+def test_tiff_get_channel_single_channel_without_c_axis_returns_full_array(tmp_path: Path, fake_tiff_file_no_series, monkeypatch):
+    p = tmp_path / "x.tif"
+    p.write_bytes(b"fake")
+    monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_no_series)
+    monkeypatch.setattr("fits_io.readers.tiff_axis_io.TiffFile", fake_tiff_file_no_series)
+
+    r = TiffReader(p, _channel_labels=["GFP"])
+    out = r.get_channel("GFP")
+
+    assert isinstance(out, np.ndarray)
+    assert out.shape == (5, 6)
 
 
 def test_tiff_axis_index(tmp_path: Path, fake_tiff_file_full, monkeypatch):

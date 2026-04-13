@@ -1,4 +1,4 @@
-from typing import Any, Literal, Sequence, TypeAlias
+from typing import Any, Literal, Sequence, TypeAlias, get_args
 
 # private tag to save custom metadata in tiff files
 TiffTag: TypeAlias = tuple[
@@ -15,7 +15,7 @@ PixelSize: TypeAlias = tuple[float, float]  # (x_um_per_pix, y_um_per_pix)
 PixelDensity: TypeAlias = tuple[float, float]  # (x_pix_per_unit, y_pix_per_unit)
 
 ExtTags = Literal['.tiff', '.tif', '.nd2']
-StatusFlag = Literal["active", "skip"]
+SUPPORTED_EXTENSIONS: set[ExtTags] = set(get_args(ExtTags))
 
 Zproj = Literal['max', 'mean', None]
 

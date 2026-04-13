@@ -1,5 +1,7 @@
 from typing import Sequence
 
+from fits_io.readers._types import Zproj
+
 
 def validate_labels(labels: str | Sequence[str] | None, n_channels: int) -> list[str] | None:
     """
@@ -26,3 +28,13 @@ def get_channel_count(channel_labels: str | Sequence[str] | None, reader_channel
     if isinstance(channel_labels, str):
         return 1
     return len(list(channel_labels))
+
+
+def resolve_axes(*, axis_order: str | None, reader_axes: str, z_projection: Zproj, n_channels: int) -> str:
+    """Resolve output axes string for ImageJ metadata."""
+    axes = axis_order if axis_order is not None else reader_axes
+    if z_projection is not None:
+        axes = axes.replace('Z', '')
+    if n_channels == 1:
+        axes = axes.replace('C', '')
+    return axes

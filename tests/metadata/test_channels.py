@@ -1,6 +1,6 @@
 import pytest
 
-from fits_io.metadata.channels import get_channel_count, validate_labels
+from fits_io.metadata.arrays import get_channel_count, validate_labels
 
 
 def test_validate_labels_none_returns_none():

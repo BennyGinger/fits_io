@@ -98,3 +98,33 @@ def test_out_of_range_channel_raises(tiff_tzcyx):
 
     with pytest.raises(IndexError):
         read_tiff_channels(path, 99, channel_labels=labels)
+
+
+@pytest.fixture()
+def tiff_yx_single_channel(tmp_path):
+    path = tmp_path / "single_channel_yx.tif"
+    data = np.arange(16, dtype=np.uint16).reshape(4, 4)
+
+    tiff.imwrite(
+        path,
+        data,
+        imagej=True,
+        metadata={"axes": "YX", "Labels": ["GFP"]},
+    )
+    return path, data, ["GFP"]
+
+
+def test_read_single_channel_without_c_axis_by_index_returns_full_array(tiff_yx_single_channel):
+    path, data, labels = tiff_yx_single_channel
+
+    out = read_tiff_channels(path, 0, channel_labels=labels)
+    assert out.shape == data.shape
+    np.testing.assert_array_equal(out, data)
+
+
+def test_read_single_channel_without_c_axis_by_label_returns_full_array(tiff_yx_single_channel):
+    path, data, labels = tiff_yx_single_channel
+
+    out = read_tiff_channels(path, "GFP", channel_labels=labels)
+    assert out.shape == data.shape
+    np.testing.assert_array_equal(out, data)

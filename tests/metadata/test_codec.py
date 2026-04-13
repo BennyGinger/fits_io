@@ -1,7 +1,7 @@
 import json
 
 from fits_io.metadata.codec import decode_metadata, encode_metadata
-from fits_io.metadata.provenance import FITS_TAG
+from fits_io.metadata.codec import FITS_TAG
 
 
 def test_encode_metadata_with_data_returns_tiff_tag_payload():

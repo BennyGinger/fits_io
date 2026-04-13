@@ -5,13 +5,13 @@ from pathlib import Path
 import json
 import logging
 
-from fits_io.metadata.provenance import FITS_TAG
+from fits_io.metadata.codec import FITS_TAG
 from fits_io.readers.tiff_axis_io import read_tiff_channels
 from numpy.typing import NDArray
 from tifffile import TiffFile, TiffPage, imread, COMPRESSION, TiffTag
 
-from fits_io.readers._types import ArrAxis, PixelSize, StatusFlag, Zproj
-from fits_io.readers.protocol import ALLOWED_FLAGS, DEFAULT_FLAG, ImageReader
+from fits_io.readers._types import ArrAxis, PixelSize, Zproj
+from fits_io.readers.protocol import ImageReader
 
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,6 @@ class TiffReader(ImageReader):
     _compression_method: list[str | None] = field(init=False)
     _resolution: list[PixelSize | None] = field(init=False, default_factory=list)
     _imageJ_meta: dict[str, Any] = field(init=False)
-    _status: StatusFlag = field(init=False)
     _custom_metadata: Mapping[str, Any] = field(init=False)
     
     @classmethod
@@ -51,7 +50,6 @@ class TiffReader(ImageReader):
             meta = cast(TiffPage, tif.series[0].pages[0]).tags.get(FITS_TAG)
             self._custom_metadata = self._get_custom_metadata_from_tags(meta)
             
-        self._status = self._get_status_from_metadata()
         self._validate_channel_label_override()
     
     def _get_compression_from_tags(self, tiff_page: TiffPage) -> str | None:
@@ -100,11 +98,6 @@ class TiffReader(ImageReader):
             out[key.strip()] = value.strip()
         return out
     
-    def _get_status_from_metadata(self) -> StatusFlag:
-        
-        flag = self._custom_metadata.get("status", DEFAULT_FLAG)
-        return flag if flag in ALLOWED_FLAGS else DEFAULT_FLAG
-    
     @property
     def axes(self) -> list[str]:
         return self._axes
@@ -120,11 +113,13 @@ class TiffReader(ImageReader):
     
     @property
     def zproj_method(self) -> Zproj:
+        fits_meta = self._custom_metadata.get("fits_io", {})
+        if isinstance(fits_meta, Mapping):
+            z_projection = fits_meta.get("z_projection", None)
+            if z_projection is not None:
+                return z_projection
+        # Legacy support for old metadata format where z_projection_method was saved at the top level
         return self._custom_metadata.get("z_projection_method", None)
-    
-    @property
-    def status(self) -> StatusFlag:
-        return self._status
     
     @property
     def channel_number(self) -> list[int]:

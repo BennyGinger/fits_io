@@ -8,7 +8,6 @@ import numpy as np
 from numpy.typing import NDArray
 from tifffile import TiffFile
 
-# BUG: If only one channel in the array, just silently load the array, and not raise because there's no 'C' axis. 
 def read_tiff_channels(path: str | Path, channel: int | str | Sequence[int | str], *, channel_labels: Sequence[str] | None = None, series_index: int = 0,) -> NDArray[Any]:
     """
     Read one or more channels from a TIFF hyperstack stored as pages (e.g. TZCYX).
@@ -34,9 +33,7 @@ def read_tiff_channels(path: str | Path, channel: int | str | Sequence[int | str
         Array with the requested channels.
     """
     # normalize input
-    chan_list: list[int | str] = (
-        [channel] if isinstance(channel, (int, str)) else list(channel)
-    )
+    chan_list: list[int | str] = ([channel] if isinstance(channel, (int, str)) else list(channel))
     if not chan_list:
         raise ValueError("channel selection cannot be empty")
 
@@ -67,6 +64,8 @@ def read_tiff_channels(path: str | Path, channel: int | str | Sequence[int | str
         shape = s.shape
 
         if "C" not in axes:
+            if len(c_list) == 1 and c_list[0] == 0:
+                return s.asarray()
             raise ValueError(f"No 'C' axis in TIFF axes={axes!r}")
 
         c_dim = shape[axes.index("C")]

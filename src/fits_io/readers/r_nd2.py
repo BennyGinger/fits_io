@@ -9,8 +9,8 @@ from nd2.structures import Channel, ExpLoop, ChannelMeta, Volume
 import numpy as np
 from numpy.typing import NDArray
 
-from fits_io.readers.protocol import DEFAULT_FLAG, ImageReader
-from fits_io.readers._types import PixelSize, StatusFlag, Zproj, ArrAxis
+from fits_io.readers.protocol import ImageReader
+from fits_io.readers._types import PixelSize, Zproj, ArrAxis
 
 
 logger = logging.getLogger(__name__)
@@ -56,10 +56,6 @@ class Nd2Reader(ImageReader):
     @property
     def compression_method(self) -> str | None:
         return None  # nd2 files are never compressed
-    
-    @property
-    def status(self) -> StatusFlag:
-        return DEFAULT_FLAG  # nd2 files do not have status info; default to 'active'
     
     @property
     def channel_number(self) -> list[int]:
@@ -172,6 +168,13 @@ class Nd2Reader(ImageReader):
         p_axis = self.axis_index('P')[0]
         idxs = self._normalize_channels(channel)
         chan_idxs = idxs[0] if len(idxs) == 1 else idxs  # single int if only one channel requested, else list of ints
+
+        # Some single-channel ND2 files omit the C axis entirely. In that case,
+        # channel selection is a no-op as long as the single available channel was requested.
+        if c_axis is None:
+            if self.channel_number[0] == 1 and len(idxs) == 1 and idxs[0] == 0:
+                return self.get_array(z_projection)
+            raise ValueError("Cannot select channels from ND2 data without a C axis.")
         
         # get dask array for lazy loading and channel selection
         darr = nd2.imread(self.img_path, dask=True)

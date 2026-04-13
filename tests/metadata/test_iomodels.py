@@ -1,6 +1,6 @@
 import pytest
 
-from fits_io.metadata.models import ChannelMeta, ResolutionMeta, StackMeta
+from fits_io.metadata.models import ChannelMeta, InfoSummary, ResolutionMeta, StackMeta
 
 # -------------------------
 # StackMeta
@@ -81,3 +81,47 @@ def test_channelmeta_to_dict_includes_luts_only_when_present():
     d2 = cm2.to_dict()
     if d2["mode"] == "color":
         assert "LUTs" in d2
+
+
+def test_infosummary_renders_generic_fits_metadata_block():
+    summary = InfoSummary(
+        payload={
+            "fits_io": {
+                "version": "1.2.3",
+                "axes": "TCYX",
+                "z_projection": "max",
+                "compression": "zlib",
+                "source_channel_indices": [0, 2],
+                "source_channel_count": 3,
+                "channel_labels": ["GFP", "RFP"],
+            },
+            "project_metadata": {
+                "run": "A",
+                "notes": ["x", "y"],
+                "tracking": {
+                    "threshold": 0.7,
+                    "backend": "lap",
+                    "post": {"min_length": 3},
+                },
+            },
+        },
+    )
+
+    rendered = summary.render()
+    assert "FITS METADATA" in rendered
+    assert "channel labels = ['GFP', 'RFP']" in rendered
+    assert "fits_io version = 1.2.3" in rendered
+    assert "axes = TCYX" in rendered
+    assert "z_projection = max" in rendered
+    assert "compression = zlib" in rendered
+    assert "source channel indices = [0, 2]" in rendered
+    assert "source channel count = 3" in rendered
+    assert "--- Project Metadata ---" in rendered
+    assert "\n---\nrun = \"A\"" in rendered
+    assert "\n---\nnotes = [\"x\", \"y\"]" in rendered
+    assert "\n---\n[tracking]" in rendered
+    assert 'run = "A"' in rendered
+    assert '[tracking]' in rendered
+    assert 'threshold = 0.7' in rendered
+    assert '[tracking.post]' in rendered
+    assert 'min_length = 3' in rendered

@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping, cast
 
 from fits_io.metadata.context import MetadataBuildContext, resolve_build_context
-from fits_io.readers._types import StatusFlag
 from fits_io.readers.protocol import ImageReader
 
 
@@ -16,21 +15,16 @@ class ReaderStub:
     resolution: list[tuple[float, float] | None] = field(default_factory=lambda: [(0.5, 0.25)])
     custom_metadata: Mapping[str, Any] = field(default_factory=dict)
     channel_labels: list[str] = field(default_factory=lambda: ['C_1', 'C_2'])
-    export_status: str = 'fits_io.status: active\n'
-    status: StatusFlag = 'active'
 
 
 def test_resolve_build_context_basic_fields():
-    reader = ReaderStub(custom_metadata={'status': 'active', 'user_name': 'alice'})
-    ctx = resolve_build_context(cast(ImageReader, reader), step_name='step_a', channel_labels=['GFP', 'RFP'])
+    reader = ReaderStub(custom_metadata={'legacy': 'kept'})
+    ctx = resolve_build_context(cast(ImageReader, reader), channel_labels=['GFP', 'RFP'])
     assert isinstance(ctx, MetadataBuildContext)
     assert ctx.n_channels == 2
     assert ctx.labels == ['GFP', 'RFP']
     assert ctx.axes == 'TZCYX'
-    assert ctx.base_payload['status'] == 'active'
-    assert ctx.step_name == 'step_a'
-    assert ctx.status == 'active'
-    assert ctx.user_name == 'alice'
+    assert ctx.base_payload['legacy'] == 'kept'
     assert ctx.interval == 11.0
     assert ctx.resolution == (0.5, 0.25)
 
@@ -47,13 +41,6 @@ def test_resolve_build_context_drops_c_for_single_channel():
     assert ctx.n_channels == 1
     assert ctx.labels == ['GFP']
     assert ctx.axes == 'TYX'
-
-
-def test_resolve_build_context_applies_new_overrides():
-    reader = ReaderStub(custom_metadata={'status': 'active', 'user_name': 'old'})
-    ctx = resolve_build_context(cast(ImageReader, reader), new_status='skip', new_user='new_user')
-    assert ctx.status == 'skip'
-    assert ctx.user_name == 'new_user'
 
 
 def test_resolve_build_context_uses_series_index():

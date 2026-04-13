@@ -61,6 +61,12 @@ def test_convert_to_fits_tif_sets_source_channel_identity_for_subset(writer_harn
     assert writer_harness.md_calls[0]["source_channel_indices"] == [1, 2]
 
 
+def test_convert_to_fits_tif_passes_project_metadata(writer_harness, dummy_reader) -> None:
+    api.convert_to_fits_tif(dummy_reader, project_metadata={"run_id": 7})
+    payload_kwargs = writer_harness.saved[0]["meta"].imagej_meta["kwargs"]["payload"]["kwargs"]
+    assert payload_kwargs["project_metadata"] == {"run_id": 7}
+
+
 # -----------------------------------
 # apply_zproj()
 # -----------------------------------
@@ -71,41 +77,6 @@ def test_apply_zproj_raises_on_multi_series(writer_harness_tiff, dummy_reader) -
 
     with pytest.raises(ValueError, match="Expected a single array"):
         api.apply_zproj(dummy_reader, "max")
-
-
-# -----------------------------------
-# set_status()
-# -----------------------------------
-
-def test_set_status_raises_on_non_tiff_reader(dummy_reader) -> None:
-    """Test that set_status raises TypeError for non-TiffReader."""
-    with pytest.raises(TypeError, match="only supports .tif/.tiff files"):
-        api.set_status(dummy_reader, "skip")
-
-
-def test_set_status_raises_on_invalid_status(writer_harness_tiff, dummy_reader) -> None:
-    """Test that set_status raises ValueError for invalid status."""
-    with pytest.raises(ValueError, match="Invalid status"):
-        api.set_status(dummy_reader, "invalid_status")  # type: ignore[arg-type]
-
-
-def test_set_status_raises_on_multi_series(writer_harness_tiff, dummy_reader) -> None:
-    """Test that set_status raises ValueError for multi-series."""
-    dummy_reader.array = [np.ones((3, 3), dtype=np.uint8), np.ones((3, 3), dtype=np.uint8)]
-    
-    with pytest.raises(ValueError, match="Expected a single array"):
-        api.set_status(dummy_reader, "skip")
-
-
-def test_set_status_sets_valid_status(writer_harness_tiff, dummy_reader) -> None:
-    """Test that set_status successfully sets a valid status."""
-    api.set_status(dummy_reader, "skip")
-    
-    # Check that save_tiff was called
-    assert len(writer_harness_tiff.saved) == 1
-    assert writer_harness_tiff.saved[0]["path"] == dummy_reader.img_path
-    assert "source_channel_indices" not in writer_harness_tiff.md_calls[0]
-    assert "source_channel_count" not in writer_harness_tiff.md_calls[0]
 
 
 # -----------------------------------

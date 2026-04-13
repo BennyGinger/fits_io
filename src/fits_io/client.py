@@ -6,17 +6,13 @@ from numpy.typing import NDArray
 import numpy as np
 
 from fits_io.readers.protocol import ImageReader
-from fits_io.readers._types import ArrAxis, ExtTags, StatusFlag, Zproj
+from fits_io.readers._types import ArrAxis, ExtTags, Zproj
 from fits_io.readers.factory import get_reader
-from fits_io.writers.api import apply_zproj, convert_to_fits_tif, save_array, set_channel_labels, set_status, DEFAULT_OUTPUT_NAME
+from fits_io.writers.api import apply_zproj, convert_to_fits_tif, save_array, set_channel_labels, DEFAULT_OUTPUT_NAME
 from fits_io.writers.filesystem import get_save_dirs
 
 
 T = TypeVar('T', bound=np.generic)
-
-DISTRIBUTION_NAME = "fits-io"
-STEP_NAME = "convert"
-SUPPORTED_EXTENSIONS: set[ExtTags] = {'.tiff', '.tif', '.nd2'}
 
 
 class FitsIO:
@@ -66,26 +62,6 @@ class FitsIO:
         return self.reader.custom_metadata
     
     @property
-    def status(self) -> StatusFlag:
-        """
-        Returns the status of the image.
-        """
-        return self.reader.status
-    
-    def set_status(self, status: StatusFlag) -> None:
-        """
-        Set the status of the image to either 'active' or 'skip'.
-        
-        Policy:
-        - This function will only change the status in the metadata, so it will load whatever array is already stored in the file and re-save it with updated metadata. So, no z-projection, channel labels, compression or provenance tag is applied here.
-        - Multi-series inputs are not supported here by design.
-        
-        Args:
-            status : New status to set ('active' or 'skip').
-        """
-        set_status(self.reader, status)
-    
-    @property
     def channel_labels(self) -> list[str] | None:
         """
         Returns the channel labels from the metadata, or None if not available.
@@ -97,7 +73,7 @@ class FitsIO:
         Set the channel labels in the metadata.
         
         Policy:
-        - This function will only change the channel labels in the metadata, so it will load whatever array is already stored in the file and re-save it with updated metadata. So, no z-projection, change status, compression or provenance tag is applied here.
+        - This function will only change the channel labels in metadata, so it will load whatever array is already stored in the file and re-save it with updated metadata.
         - Multi-series inputs are not supported here by design.
         
         Args:
@@ -127,7 +103,7 @@ class FitsIO:
         Apply z-projection to the image array and update the file with the projected array and updated metadata.
     
         Policy:
-        - This function will apply the specified z-projection to the existing array in the file, and re-save it with updated metadata. So, no change to channel labels, status, compression or provenance tag is applied here.
+        - This function will apply the specified z-projection to the existing array in the file and re-save it with updated metadata.
         - Multi-series inputs are not supported here by design.
         
         Args:
@@ -142,63 +118,52 @@ class FitsIO:
         """
         return get_save_dirs(self.reader)
     
-    def convert_to_fits(self, *, user_name: str = 'unknown', channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', distribution: str | None = DISTRIBUTION_NAME, step_name: str | None = STEP_NAME, output_name: str = DEFAULT_OUTPUT_NAME, custom_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib') -> list[Path]:
+    def convert_to_fits(self, *, channel_labels: str | Sequence[str] | None = None, export_channels: str | Sequence[str] = 'all', output_name: str = DEFAULT_OUTPUT_NAME, project_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = 'zlib') -> list[Path]:
         """
         Convert an image file to a FITS TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
         Args:
-            user_name : Name of the user performing the conversion, by default 'unknown'
             channel_labels : Channel labels to include in the metadata. If None, generic labels will be created, by default None
             export_channels : Channels to export. Can be 'all' or a list of channel labels, by default 'all'
-            distribution : Name of the distribution or package, by default None
-            step_name : Name of the processing step, by default None
             output_name : Optional name of the output TIFF file.
-            custom_metadata : Additional custom metadata to include in the TIFF file, by default None
+            project_metadata : Additional project-owned metadata to include in the TIFF file, by default None
             z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
             compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'. Possible values are 'zlib', 'lzma', 'zstd', 'lz4', 'lzw', 'packbits' and 'jpeg'.
         Returns:
             List of Paths of the saved TIFF files.
         """
         save_paths = convert_to_fits_tif(self.reader,
-                            user_name=user_name,
                             channel_labels=channel_labels, 
                             export_channels=export_channels,
-                            distribution=distribution, 
-                            step_name=step_name, 
                             output_name=output_name,
-                            custom_metadata=custom_metadata,
+                            project_metadata=project_metadata,
                             z_projection=z_projection, 
                             compression=compression)
         return save_paths
 
-    def save_array(self, array: NDArray, axis_order: str, channel_labels: str | Sequence[str] | None, output_name: str = DEFAULT_OUTPUT_NAME, user_name: str = "unknown", distribution: str | None = None, step_name: str | None = None, custom_metadata: Mapping[str, Any] | None = None, compression: str | None = 'zlib') -> Path:
+    def save_array(self, array: NDArray, axis_order: str, channel_labels: str | Sequence[str] | None, output_name: str = DEFAULT_OUTPUT_NAME, *, project_metadata: Mapping[str, Any] | None = None, compression: str | None = 'zlib') -> Path:
         """
         Save a given array as a FITS TIFF file with ImageJ metadata, using the input image's path as reference and transfer of metadata.
     
-        Note: this function won't apply any z-projection, channel label resolution, or provenance tag management. It will simply save the provided array with metadata built from the input image and provided parameters.
+        Note: this function won't apply z-projection or channel label resolution. It simply saves the provided array with metadata built from reader context and parameters.
         
         Args:
             array : The image array to be saved as a TIFF file.
             output_name : Optional name of the output TIFF file. If None, uses 'fits.tif' by default.
             axis_order : Axis order of the input array, used for building correct metadata. Can raise an error in Tifffile if not provided correctly.
             channel_labels : Labels for the channels in the input array, used for building metadata. This should match the channels in the input array and can be a single string for one channel or a sequence of strings for multiple channels.
-            user_name : Name of the user performing the save operation, by default "unknown".
-            distribution : Name of the distribution or package, by default None.
-            step_name : Name of the processing step, by default None.
-            custom_metadata : Additional custom metadata to include in the TIFF file, by default None.
+            project_metadata : Additional project-owned metadata to include in the TIFF file, by default None.
             compression : Compression method to use for the TIFF file. If None, no compression is applied, by default "zlib".
             
         Returns:
             Path of the saved TIFF file.
         """
         return save_array(self.reader, 
-                                  array, 
-                                  axis_order=axis_order,                                  channel_labels=channel_labels,
-                                  output_name=output_name,
-                                  user_name=user_name,
-                                  distribution=distribution, 
-                                  step_name=step_name, 
-                                  custom_metadata=custom_metadata, 
-                                  compression=compression)
+                          array,
+                          axis_order=axis_order,
+                          channel_labels=channel_labels,
+                          output_name=output_name,
+                          project_metadata=project_metadata,
+                          compression=compression)
     
     def __getattr__(self, name: str) -> Any:
         return getattr(self.reader, name)

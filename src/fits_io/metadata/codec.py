@@ -1,9 +1,9 @@
 import json
 from typing import Any, Mapping
 
-from fits_io.metadata.provenance import FITS_TAG
 from fits_io.readers._types import ExtraTags
 
+FITS_TAG = 65000
 
 def encode_metadata(payload: Mapping[str, Any]) -> ExtraTags | None:
     """Encode private metadata payload for storage in TIFF extra tags."""

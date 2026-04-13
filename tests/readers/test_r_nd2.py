@@ -53,6 +53,19 @@ def test_nd2_get_array_no_series(monkeypatch, tmp_path: Path, fake_nd2_file_noP)
     out = r.get_array()
     assert isinstance(out, np.ndarray)
     assert out.shape == (3, 4)
+
+
+def test_nd2_get_channel_single_channel_without_c_axis_returns_full_array(monkeypatch, tmp_path: Path, fake_nd2_file_noP):
+    p = tmp_path / "x.nd2"
+    p.write_bytes(b"fake")
+    monkeypatch.setattr(nd2, "ND2File", fake_nd2_file_noP)
+    monkeypatch.setattr(nd2, "imread", lambda path, dask=False: np.zeros((2, 5, 6), dtype=np.uint16))
+
+    r = Nd2Reader(p, _channel_labels=["GFP"])
+    out = r.get_channel("GFP")
+
+    assert isinstance(out, np.ndarray)
+    assert out.shape == (2, 5, 6)
     
 def test_nd2_normalize_channels_valid_int(monkeypatch, tmp_path, fake_nd2_file_3channels):
     p = tmp_path / "x.nd2"
