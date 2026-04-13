@@ -57,12 +57,35 @@ def test_build_private_payload_preserves_existing_source_channel_identity_when_n
         n_channels=2,
         labels=['GFP', 'RFP'],
         axes='TZCYX',
-        base_payload={'existing': 'data', 'source_channel_indices': [0, 2], 'source_channel_count': 3},
+        base_payload={
+            'existing': 'data',
+            'fits_io': {
+                'source_channel_indices': [0, 2],
+                'source_channel_count': 3,
+            },
+        },
         interval=11.0,
         resolution=(0.5, 0.25),
     )
     out = build_private_payload(ctx)
-    assert out['source_channel_indices'] == [0, 2]
-    assert out['source_channel_count'] == 3
-    assert out['fits_io']['source_channel_indices'] is None
-    assert out['fits_io']['source_channel_count'] is None
+    assert out['fits_io']['source_channel_indices'] == [0, 2]
+    assert out['fits_io']['source_channel_count'] == 3
+
+
+def test_build_private_payload_preserves_unknown_existing_fits_io_keys():
+    ctx = MetadataBuildContext(
+        n_channels=2,
+        labels=['GFP', 'RFP'],
+        axes='TZCYX',
+        base_payload={
+            'fits_io': {
+                'custom_key': 'keep-me',
+                'source_channel_indices': [1, 2],
+            }
+        },
+        interval=11.0,
+        resolution=(0.5, 0.25),
+    )
+    out = build_private_payload(ctx)
+    assert out['fits_io']['custom_key'] == 'keep-me'
+    assert out['fits_io']['source_channel_indices'] == [1, 2]
