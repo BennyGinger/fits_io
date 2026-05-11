@@ -38,6 +38,8 @@ LABEL_TO_COLOR = {
     "rfp": 'red',
     'gray': 'gray',
     'grey': 'gray',
+    'bf': 'gray',
+    'brightfield': 'gray',
 }
 
 def make_color_lut(color: str) -> NDArray[np.uint8]:
