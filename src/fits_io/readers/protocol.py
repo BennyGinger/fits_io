@@ -1,41 +1,26 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from collections.abc import Mapping, Sequence
 
+from fits_io.metadata.models import FitsIOPayload
 import numpy as np
 from numpy.typing import NDArray
 
-from fits_io.readers._types import ArrAxis, PixelSize, Zproj
+from fits_io.readers._types import PixelSize, Zproj
 
 @dataclass
 class ImageReader(ABC):
     """Abstract base class for image readers."""
 
     img_path: Path
-    _channel_labels: list[str] | None = field(default=None, kw_only=True)
-    _shape: list[tuple[int, ...]] = field(init=False)
+    series_idx: int = 0
+    _shape: tuple[int, ...] = field(init=False)
+    _axes: str = field(init=False)
     
-    def _validate_channel_label_override(self) -> None:
-        if self._channel_labels is None:
-            return
-
-        counts = self.channel_number
-        unique = sorted(set(counts))
-        if len(unique) != 1:
-            raise ValueError(
-                "Cannot use a single global channel_labels override because this file has "
-                f"different channel counts per series: {counts}. "
-                "Either omit channel_labels or provide per-series labels (not supported yet)."
-            )
-
-        n = unique[0]
-        if len(self._channel_labels) != n:
-            raise ValueError(
-                f"Length of provided channel_labels ({len(self._channel_labels)}) does not "
-                f"match number of channels in image ({n})."
-            )
     
     @classmethod
     @abstractmethod
@@ -45,29 +30,25 @@ class ImageReader(ABC):
 
     @property
     @abstractmethod
-    def shape(self) -> list[tuple[int, ...]]:
+    def has_series(self) -> bool:
+        """Return True if the image has multiple series."""
+        ...
+    
+    @abstractmethod
+    def split_series(self) -> list[ImageReader]:
+        """Return a list of ImageReader instances, one for each series."""
+        ...
+    
+    @property
+    @abstractmethod
+    def shape(self) -> tuple[int, ...]:
         """Return the shape of the image data of each series."""
         ...
     
     @property
-    def channel_labels(self) -> list[str] | None:
-        """User override if provided, otherwise subclass may return its own labels."""
-        return self._channel_labels if self._channel_labels is not None else self._native_channel_labels()
-
     @abstractmethod
-    def _native_channel_labels(self) -> list[str] | None:
-        """Subclasses return labels from file (or None if unavailable)."""
-        ...
-    
-    @property
-    @abstractmethod
-    def axes(self) -> list[str]:
+    def axes(self) -> str:
         """Return the axes string for the image data"""
-        ...
-    
-    @abstractmethod
-    def axis_index(self, axis: ArrAxis) -> list[int | None]:
-        """Return the index of the specified axis for each series, or None if not present."""
         ...
     
     @property
@@ -84,20 +65,20 @@ class ImageReader(ABC):
     
     @property
     @abstractmethod
-    def channel_number(self) -> list[int]:
-        """Return the number of channels in the image for each series, or 1 if not applicable."""
+    def channel_count(self) -> int:
+        """Return the number of channels in the image, or 1 if not applicable."""
         ...
     
     @property
     @abstractmethod
-    def series_number(self) -> int:
+    def series_count(self) -> int:
         """Return the number of series in the image, or 1 if not applicable."""
         ...
     
     @property
     @abstractmethod
-    def resolution(self) -> list[PixelSize | None]:
-        """Return a list of resolution (um per pixel) for (x,y) axes. If none available, return (1.,1.), for each series."""
+    def resolution(self) -> PixelSize | None:
+        """Return the resolution (um per pixel) for (x,y) axes. If not available, return None."""
         ...
     
     @property
@@ -108,17 +89,41 @@ class ImageReader(ABC):
     
     @property
     @abstractmethod
-    def custom_metadata(self) -> Mapping[str, Any]:
-        """Return custom metadata, if any, associated with the custom pipeline saved under extratags, or empty dict if not available."""
+    def metadata(self) -> FitsIOPayload:
+        """Return array metadata, including fits_io metadata and custom metadata."""
         ...
     
     @abstractmethod
-    def get_array(self, z_projection: Zproj = None) -> NDArray[Any] | list[NDArray[Any]]:
-        """Return the image data as a NumPy array. If multiple series, return a list of arrays."""
+    def get_array(self, z_projection: Zproj = None) -> NDArray[Any]:
+        """Return the image data as a NumPy array. If multiple series are present, it will return the first series' array. """
         ...
     
+    def _normalize_channel_indices(self, channel_indices: int | Sequence[int]) -> list[int]:
+        """
+        Make sure that channel_indices is a list of ints, and remove duplicates while preserving order.
+        """
+        c_list = [channel_indices] if isinstance(channel_indices, int) else list(channel_indices)
+        if not c_list:
+            raise ValueError("channel selection cannot be empty")
+        
+        for c in c_list:
+            if not isinstance(c, int):
+                raise TypeError(f"channel indices must be int, got {type(c).__name__}")
+        
+        seen: set[int] = set() # Removes duplicates while preserving order
+        return [c for c in c_list if not (c in seen or seen.add(c))]
+    
+    
+    def _validate_channel_indices(self, normalized_channel_indices: Sequence[int]) -> None:
+        """
+        Validate that the provided channel indices are within the valid range for the image's channel count.
+        """
+        for c in normalized_channel_indices:
+            if not (0 <= c < self.channel_count):
+                raise IndexError(f"channel index {c} out of range (0..{self.channel_count - 1})")
+    
     @abstractmethod
-    def get_channel(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> NDArray[Any] | list[NDArray[Any]]:
+    def get_channel(self, channel: int | Sequence[int], z_projection: Zproj = None) -> NDArray[Any]:
         """Return the selected channel(s) as a NumPy array or list of arrays. Channel can be specified by index or label."""
         ...
 
@@ -144,3 +149,28 @@ class ImageReader(ABC):
             return np.mean(arr, axis=z_axis)
         else:
             raise ValueError(f"Unsupported z-projection method: {zproj}")
+        
+
+if __name__ == "__main__":
+    from pathlib import Path
+    from tifffile import TiffFile
+    
+    file_path = Path("/media/ben/Analysis/Python/Images/tiff/Run2/c2z25t23v1_tif.tif")
+    
+    with TiffFile(file_path) as reader:
+        series_list = reader.series
+    
+    print(f"Number of series: {len(series_list)}")
+    print(f"Series shapes: {[s.shape for s in series_list]}")
+    try:
+        arr = series_list[0].asarray()
+        print(f"Array shape: {arr.shape}")
+    except Exception as e:
+        print(f"Error reading array: {e}")
+    
+    with TiffFile(file_path) as reader:
+        series = reader.series[0]
+        arr = series.asarray()
+    
+    print(f"Array shape: {arr.shape}")
+    

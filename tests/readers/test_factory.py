@@ -66,18 +66,16 @@ def test_get_reader_with_string_path(tmp_path: Path, monkeypatch, fake_tiff_file
     assert isinstance(r, TiffReader)
 
 
-def test_get_reader_with_channel_labels(tmp_path: Path, monkeypatch, fake_tiff_file_full):
-    """Test that channel_labels are passed to the reader."""
+def test_get_reader_with_multi_channel_tiff(tmp_path: Path, monkeypatch, fake_tiff_file_full):
+    """Test that get_reader returns a valid reader for a multi-channel TIFF."""
     p = tmp_path / "image.tif"
     p.write_bytes(b"fake")
     import fits_io.readers.r_tiff as r_tiff
     monkeypatch.setattr(r_tiff, "TiffFile", fake_tiff_file_full)
 
-    # fake_tiff_file_full has 3 channels (CYX shape is (3, 5, 6))
-    labels = ["GFP", "mCherry", "DAPI"]
-    r = get_reader(p, channel_labels=labels)
+    r = get_reader(p)
     assert isinstance(r, TiffReader)
-    # Note: The actual behavior depends on TiffReader implementation
+    assert r.channel_count == 3
 
 
 # -------------------------

@@ -4,23 +4,30 @@ from __future__ import annotations
 from pathlib import Path
 import pytest
 
-from fits_io.writers.filesystem import build_output_path, get_save_dirs, mkdirs_paths, _ends_with_s_number
+from fits_io.writers.filesystem import build_output_paths, get_save_dirs, mkdirs_paths, _ends_with_s_number
 
 # -----------------------------
 # Filesystem tests (unchanged)
 # -----------------------------
 
 def test_build_output_path_joins_series_dir_and_save_name(tmp_path: Path) -> None:
-    series_dir = tmp_path / "sample_s1"
-    out = build_output_path(series_dir, save_name="fits_masks.tif")
-    assert out == series_dir / "fits_masks.tif"
+    from conftest import DummyReader
+
+    reader = DummyReader(img_path=tmp_path / "sample.tif", series_idx=0)
+
+    out = build_output_paths([reader], save_name="fits_masks.tif")
+    # tmp_path name can already end with _sN in pytest temp dirs; current API then reuses parent.
+    assert out == [(tmp_path / "fits_masks.tif")]
 
 
 @pytest.mark.parametrize("bad_save_name", ["", None, 123])
 def test_build_output_path_rejects_bad_save_name(tmp_path: Path, bad_save_name: object) -> None:
-    series_dir = tmp_path / "sample_s1"
+    from conftest import DummyReader
+
+    reader = DummyReader(img_path=tmp_path / "sample.tif", series_idx=0)
+
     with pytest.raises(ValueError):
-        build_output_path(series_dir, save_name=bad_save_name)  # type: ignore[arg-type]
+        build_output_paths([reader], save_name=bad_save_name)  # type: ignore[arg-type]
 
 
 def test_get_save_dirs_creates_s1_for_single_series(tmp_path: Path) -> None:
@@ -28,14 +35,10 @@ def test_get_save_dirs_creates_s1_for_single_series(tmp_path: Path) -> None:
     input_path.parent.mkdir(parents=True, exist_ok=True)
     input_path.write_bytes(b"")
 
-    # We only need img_path + series_number for get_save_dirs
-    class _R:
-        img_path = input_path
-        series_number = 1
+    from conftest import DummyReader
 
-    dirs = get_save_dirs(_R())  # type: ignore[arg-type]
-    if isinstance(dirs, Path):
-        dirs = [dirs]
+    reader = DummyReader(img_path=input_path, series_idx=0)
+    dirs = get_save_dirs([reader])
 
     created = mkdirs_paths(dirs)
     assert len(created) == 1
@@ -50,13 +53,10 @@ def test_get_save_dirs_creates_one_folder_per_series(tmp_path: Path) -> None:
     input_path.parent.mkdir(parents=True, exist_ok=True)
     input_path.write_bytes(b"")
 
-    class _R:
-        img_path = input_path
-        series_number = 3
+    from conftest import DummyReader
 
-    dirs = get_save_dirs(_R())  # type: ignore[arg-type]
-    if isinstance(dirs, Path):
-        dirs = [dirs]
+    readers = [DummyReader(img_path=input_path, series_idx=i) for i in range(3)]
+    dirs = get_save_dirs(readers)
 
     created = mkdirs_paths(dirs)
     assert created == [
@@ -92,11 +92,9 @@ def test_get_save_dirs_already_fits_file(tmp_path: Path):
     input_path = fits_dir / "array.tif"
     input_path.write_bytes(b"")
     
-    class _R:
-        img_path = input_path
-        series_number = 1
+    from conftest import DummyReader
     
-    dirs = get_save_dirs(_R())  # type: ignore[arg-type]
+    dirs = get_save_dirs([DummyReader(img_path=input_path, series_idx=0)])
     assert dirs == [fits_dir]
 
 # Test mkdirs_paths directly

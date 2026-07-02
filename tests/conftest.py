@@ -6,7 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping, Sequence, Callable
 
-from fits_io.readers._types import ArrAxis, Zproj
+from fits_io.metadata.models import FitsIOPayload
+from fits_io.readers._types import Zproj
 import numpy as np
 import pytest
 from numpy.typing import NDArray
@@ -71,13 +72,51 @@ class DummyReader(ImageReader):
         if self.channel_array is None:
             self.channel_array = np.ones((2, 3), dtype=np.uint8)
 
+        arr0 = self.array[0] if isinstance(self.array, list) else self.array
+        if arr0 is None:
+            arr0 = np.ones((2, 3), dtype=np.uint8)
+        self._shape = arr0.shape
+        self._axes = "YX" if arr0.ndim == 2 else "CYX"
+
     @classmethod
     def can_read(cls, path: Path) -> bool:
         return True
 
     @property
-    def axes(self) -> list[str]:
-        return ["YX"]
+    def has_series(self) -> bool:
+        return self._series_number > 1
+
+    def split_series(self) -> list[ImageReader]:
+        if not self.has_series:
+            return [self]
+
+        if isinstance(self.array, list):
+            arrays = self.array
+        else:
+            arrays = [self.array] * self._series_number
+
+        if isinstance(self.channel_array, list):
+            channel_arrays = self.channel_array
+        else:
+            channel_arrays = [self.channel_array] * self._series_number
+
+        out: list[ImageReader] = []
+        for i in range(self._series_number):
+            out.append(
+                DummyReader(
+                    img_path=self.img_path,
+                    series_idx=i,
+                    _series_number=1,
+                    _labels=list(self._labels or []),
+                    array=arrays[i] if i < len(arrays) else arrays[0],
+                    channel_array=channel_arrays[i] if i < len(channel_arrays) else channel_arrays[0],
+                )
+            )
+        return out
+
+    @property
+    def axes(self) -> str:
+        return self._axes
 
     @property
     def compression_method(self) -> str | None:
@@ -88,53 +127,49 @@ class DummyReader(ImageReader):
         return None
 
     @property
-    def export_status(self) -> str:
-        return ""
+    def channel_count(self) -> int:
+        return len(self._labels or [])
 
     @property
-    def channel_number(self) -> list[int]:
-        return [len(self._labels or [])]
-
-    def _native_channel_labels(self) -> list[str] | None:
-        return self._labels
-
-    @property
-    def series_number(self) -> int:
+    def series_count(self) -> int:
         return self._series_number
 
-    def axis_index(self, axis: ArrAxis) -> list[int | None]:
-        return [None] * self.series_number
-
     @property
-    def resolution(self) -> list[tuple[float, float] | None]:
-        return [None] * self.series_number
+    def resolution(self) -> tuple[float, float] | None:
+        return None
 
     @property
     def interval(self) -> float | None:
         return None
 
     @property
-    def shape(self) -> list[tuple[int, ...]]:
-        if isinstance(self.array, list):
-            return [arr.shape for arr in self.array]
-        return [self.array.shape] if self.array is not None else [(2, 3)]
+    def shape(self) -> tuple[int, ...]:
+        return self.get_array().shape
 
     @property
-    def custom_metadata(self) -> Mapping[str, Any]:
-        return {}
+    def metadata(self) -> FitsIOPayload:
+        return FitsIOPayload().with_fitsio(channel_labels=list(self._labels or []), n_channels=self.channel_count)
 
-    def get_array(self, z_projection: Zproj = None) -> NDArray | list[NDArray]:
+    def get_array(self, z_projection: Zproj = None) -> NDArray:
         self.called_get_array += 1
-        return self.array  # type: ignore[return-value]
+        if isinstance(self.array, list):
+            return self.array[self.series_idx]
+        if self.array is None:
+            return np.ones((2, 3), dtype=np.uint8)
+        return self.array
 
     def get_channel(
         self,
-        channel: int | str | Sequence[int | str],
+        channel: int | Sequence[int],
         z_projection: Zproj = None,
-    ) -> NDArray | list[NDArray]:
+    ) -> NDArray:
         self.called_get_channel += 1
         self.last_get_channel_arg = channel
-        return self.channel_array  # type: ignore[return-value]
+        if isinstance(self.channel_array, list):
+            return self.channel_array[self.series_idx]
+        if self.channel_array is None:
+            return np.ones((2, 3), dtype=np.uint8)
+        return self.channel_array
 
 
 @pytest.fixture
@@ -206,6 +241,12 @@ class FakeTiff:
 
     def __exit__(self, *args):
         return False
+
+    def asarray(self, key=None):
+        arr = self.series[0].asarray()
+        if key is None:
+            return arr
+        return arr[key]
 
 
 @pytest.fixture
@@ -348,6 +389,7 @@ class _Volume:
 class FakeND2:
     def __init__(self, sizes, metadata, experiment):
         self.sizes = sizes
+        self.shape = tuple(sizes.values())
         self.metadata = metadata
         self.experiment = experiment
 
@@ -525,7 +567,7 @@ class WriterHarness:
 
 @pytest.fixture
 def writer_harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> WriterHarness:
-    import fits_io.writers.api as writer_mod
+    import fits_io.writers.apis as writer_mod
 
     h = WriterHarness(tmp_path=tmp_path, writer_mod=writer_mod)
     h.save_dirs = [tmp_path / "img_s1"]
@@ -580,6 +622,6 @@ def writer_harness_tiff(monkeypatch: pytest.MonkeyPatch, writer_harness: WriterH
     Same harness, but makes DummyReader pass the `isinstance(..., TiffReader)` guard
     used in metadata-rewrite helpers.
     """
-    import fits_io.writers.api as writer_mod
+    import fits_io.writers.apis as writer_mod
     monkeypatch.setattr(writer_mod, "TiffReader", type(dummy_reader))
     return writer_harness

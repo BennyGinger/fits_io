@@ -1,7 +1,6 @@
 import numpy as np
 import pytest
 from pathlib import Path
-from tifffile import TiffFile, imread
 
 from fits_io.readers.r_tiff import TiffReader
 
@@ -15,10 +14,10 @@ def test_tiff_axes_channel_series_resolution_interval(monkeypatch, tmp_path: Pat
     monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_full)
 
     r = TiffReader(p)
-    assert r.axes == ["CYX", "CYX"]
-    assert r.channel_number == [3, 3]
-    assert r.series_number == 2
-    assert r.resolution == [(0.5, 0.25), (0.5, 0.25)]
+    assert r.axes == "CYX"
+    assert r.channel_count == 3
+    assert r.series_count == 2
+    assert r.resolution == (0.5, 0.25)
     assert r.interval == 11.0
 
 
@@ -27,12 +26,11 @@ def test_tiff_get_array_no_series(monkeypatch, tmp_path: Path, fake_tiff_file_no
     p.write_bytes(b"fake")
 
     monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_no_series_axes)
-    monkeypatch.setattr("fits_io.readers.r_tiff.imread", lambda _: np.zeros((2, 3, 4), dtype=np.uint8))
 
     r = TiffReader(p)
     out = r.get_array()
     assert isinstance(out, np.ndarray)
-    assert out.shape == (2, 3, 4)
+    assert out.shape == (2, 5, 6)
 
 
 def test_tiff_get_array_with_series_splits(monkeypatch, tmp_path: Path, fake_tiff_file_series_S0):
@@ -40,33 +38,11 @@ def test_tiff_get_array_with_series_splits(monkeypatch, tmp_path: Path, fake_tif
     p.write_bytes(b"fake")
 
     monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_series_S0)
-    monkeypatch.setattr("fits_io.readers.r_tiff.imread", lambda _: np.zeros((2, 5, 6), dtype=np.uint8))  # S,Y,X
 
     r = TiffReader(p)
     out = r.get_array()
-    assert isinstance(out, list)
-    assert len(out) == 2
-    assert out[0].shape == (5, 6)
-
-
-def test_tiff_parse_info_valid(tmp_path: Path, fake_tiff_file_with_info, monkeypatch):
-    p = tmp_path / "x.tif"
-    p.write_bytes(b"fake")
-    monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_with_info)
-    
-    r = TiffReader(p)
-    info = r._parse_info()
-    assert info == {"key1": "value1", "key2": "value2"}
-
-
-def test_tiff_parse_info_no_info(tmp_path: Path, fake_tiff_file_no_series, monkeypatch):
-    p = tmp_path / "x.tif"
-    p.write_bytes(b"fake")
-    monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_no_series)
-    
-    r = TiffReader(p)
-    info = r._parse_info()
-    assert info == {}
+    assert isinstance(out, np.ndarray)
+    assert out.shape == (5, 6)
 
 
 def test_tiff_zproj_from_fits_io_metadata(tmp_path: Path, fake_tiff_file_with_status, monkeypatch):
@@ -87,49 +63,13 @@ def test_tiff_zproj_default_none(tmp_path: Path, fake_tiff_file_no_series, monke
     assert r.zproj_method is None
 
 
-def test_tiff_channel_labels_string(tmp_path: Path, fake_tiff_file_with_single_label, monkeypatch):
-    p = tmp_path / "x.tif"
-    p.write_bytes(b"fake")
-    monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_with_single_label)
-    
-    r = TiffReader(p)
-    assert r.channel_labels == ["DAPI"]
-
-
-def test_tiff_channel_labels_list(tmp_path: Path, fake_tiff_file_with_label_list, monkeypatch):
-    p = tmp_path / "x.tif"
-    p.write_bytes(b"fake")
-    monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_with_label_list)
-    
-    r = TiffReader(p)
-    assert r.channel_labels == ["DAPI", "GFP", "RFP"]
-
-
-def test_tiff_channel_labels_none(tmp_path: Path, fake_tiff_file_no_series, monkeypatch):
-    p = tmp_path / "x.tif"
-    p.write_bytes(b"fake")
-    monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_no_series)
-    
-    r = TiffReader(p)
-    assert r.channel_labels is None
-
-
-def test_tiff_custom_metadata_valid_json(tmp_path: Path, fake_tiff_file_with_custom_meta, monkeypatch):
+def test_tiff_metadata_with_payload_json(tmp_path: Path, fake_tiff_file_with_custom_meta, monkeypatch):
     p = tmp_path / "x.tif"
     p.write_bytes(b"fake")
     monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_with_custom_meta)
-    
-    r = TiffReader(p)
-    assert r.custom_metadata == {"fits_io": {"z_projection": "max"}, "extra": "data"}
 
-
-def test_tiff_custom_metadata_no_tag(tmp_path: Path, fake_tiff_file_no_series, monkeypatch):
-    p = tmp_path / "x.tif"
-    p.write_bytes(b"fake")
-    monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_no_series)
-    
     r = TiffReader(p)
-    assert r.custom_metadata == {}
+    assert r.metadata.fits_io.z_projection == "max"
 
 
 def test_tiff_compression_method(tmp_path: Path, fake_tiff_file_with_compression, monkeypatch):
@@ -147,7 +87,7 @@ def test_tiff_channel_number_no_c_axis(tmp_path: Path, fake_tiff_file_no_series,
     monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_no_series)
     
     r = TiffReader(p)
-    assert r.channel_number == [1]
+    assert r.channel_count == 1
 
 
 def test_tiff_channel_number_with_c_axis(tmp_path: Path, fake_tiff_file_with_label_list, monkeypatch):
@@ -156,7 +96,7 @@ def test_tiff_channel_number_with_c_axis(tmp_path: Path, fake_tiff_file_with_lab
     monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_with_label_list)
     
     r = TiffReader(p)
-    assert r.channel_number == [3]
+    assert r.channel_count == 3
 
 
 def test_tiff_get_array_with_z_projection_max(tmp_path: Path, fake_tiff_file_no_series_axes, monkeypatch):
@@ -169,7 +109,27 @@ def test_tiff_get_array_with_z_projection_max(tmp_path: Path, fake_tiff_file_no_
                          [[2, 3, 4, 5], [6, 7, 8, 9], [10, 11, 12, 13]]], dtype=np.uint8)
     
     monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_no_series_axes)
-    monkeypatch.setattr("fits_io.readers.r_tiff.imread", lambda _: test_arr)
+    
+    class _FakeSeries:
+        axes = "ZYX"
+        shape = test_arr.shape
+        pages = [type("P", (), {"tags": {"Compression": type("C", (), {"value": 1})()}})()]
+
+        @staticmethod
+        def asarray():
+            return test_arr
+
+    class _FakeTiff:
+        series = [_FakeSeries()]
+        imagej_metadata = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", lambda _p: _FakeTiff())
     
     r = TiffReader(p)
     out = r.get_array(z_projection='max')
@@ -183,27 +143,12 @@ def test_tiff_get_channel_single_channel_without_c_axis_returns_full_array(tmp_p
     p = tmp_path / "x.tif"
     p.write_bytes(b"fake")
     monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_no_series)
-    monkeypatch.setattr("fits_io.readers.tiff_axis_io.TiffFile", fake_tiff_file_no_series)
 
-    r = TiffReader(p, _channel_labels=["GFP"])
-    out = r.get_channel("GFP")
+    r = TiffReader(p)
+    out = r.get_channel(0)
 
     assert isinstance(out, np.ndarray)
     assert out.shape == (5, 6)
-
-
-def test_tiff_axis_index(tmp_path: Path, fake_tiff_file_full, monkeypatch):
-    """Test axis_index returns correct indices for each series."""
-    p = tmp_path / "x.tif"
-    p.write_bytes(b"fake")
-    monkeypatch.setattr("fits_io.readers.r_tiff.TiffFile", fake_tiff_file_full)
-    
-    r = TiffReader(p)
-    assert r.axis_index('C') == [0, 0]  # C is at index 0 in both series
-    assert r.axis_index('Y') == [1, 1]  # Y is at index 1 in both series
-    assert r.axis_index('X') == [2, 2]  # X is at index 2 in both series
-    assert r.axis_index('Z') == [None, None]  # Z not present
-    assert r.axis_index('T') == [None, None]  # T not present
 
 
 def test_tiff_can_read_valid(tmp_path: Path):

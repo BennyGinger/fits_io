@@ -1,48 +1,51 @@
-import pytest
+from __future__ import annotations
+
 import numpy as np
 
-from fits_io.writers.utils import get_array_to_export
+from fits_io.writers import apis
 
 
-def test_get_array_to_export_all_calls_get_array(dummy_reader):
-    dummy_reader.array = np.ones((4, 4), dtype=np.uint8)
+def test_convert_to_fits_tif_uses_get_channel_for_subset(monkeypatch, dummy_reader):
+    calls = {"get_array": 0, "get_channel": 0}
 
-    out = get_array_to_export(
+    def fake_get_array(z_projection=None):
+        calls["get_array"] += 1
+        return np.ones((3, 4, 4), dtype=np.uint8)
+
+    def fake_get_channel(channel, z_projection=None):
+        calls["get_channel"] += 1
+        assert channel == [1]
+        return np.ones((4, 4), dtype=np.uint8)
+
+    dummy_reader.get_array = fake_get_array
+    dummy_reader.get_channel = fake_get_channel
+
+    monkeypatch.setattr(apis, "build_output_paths", lambda _series, _name: [dummy_reader.img_path.with_name("fits.tif")])
+    monkeypatch.setattr(apis, "save_tiff", lambda *_args, **_kwargs: None)
+
+    apis.convert_to_fits_tif(
         dummy_reader,
-        export_channels=["C_1"],   # ignored in this branch
-        export_all_flag=True,
-        z_projection="max",
-    )
-
-    assert dummy_reader.called_get_array == 1
-    assert dummy_reader.called_get_channel == 0
-    assert isinstance(out, list)
-    assert out[0].shape == (4, 4)
-
-
-def test_get_array_to_export_subset_calls_get_channel(dummy_reader):
-    dummy_reader.channel_array = np.ones((5, 5), dtype=np.uint8)
-
-    out = get_array_to_export(
-        dummy_reader,
+        channel_labels=["C_1", "C_2", "C_3"],
         export_channels=["C_2"],
-        export_all_flag=False,
-        z_projection=None,
     )
 
-    assert dummy_reader.called_get_array == 0
-    assert dummy_reader.called_get_channel == 1
-    assert dummy_reader.last_get_channel_arg == ["C_2"]
-    assert len(out) == 1
-    assert out[0].shape == (5, 5)
+    assert calls["get_channel"] == 1
+    assert calls["get_array"] == 0
 
 
-def test_get_array_to_export_empty_array_raises(dummy_reader):
-    dummy_reader.array = np.array([], dtype=np.uint8)
+def test_convert_to_fits_tif_default_uses_get_channel_with_all_indices(monkeypatch, dummy_reader):
+    calls = {"get_channel": 0}
 
-    with pytest.raises(ValueError, match="Export produced empty arrays"):
-        get_array_to_export(
-            dummy_reader,
-            export_channels=["C_1"],
-            export_all_flag=True,
-        )
+    def fake_get_channel(channel, z_projection=None):
+        calls["get_channel"] += 1
+        assert channel == [0, 1, 2]
+        return np.ones((3, 4, 4), dtype=np.uint8)
+
+    dummy_reader.get_channel = fake_get_channel
+
+    monkeypatch.setattr(apis, "build_output_paths", lambda _series, _name: [dummy_reader.img_path.with_name("fits.tif")])
+    monkeypatch.setattr(apis, "save_tiff", lambda *_args, **_kwargs: None)
+
+    apis.convert_to_fits_tif(dummy_reader)
+
+    assert calls["get_channel"] == 1

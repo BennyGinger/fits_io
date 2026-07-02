@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from fits_io.metadata.lut import make_color_lut
+from fits_io.metadata.imageJ_meta import make_color_lut
 
 # -------------------------
 # make_color_lut

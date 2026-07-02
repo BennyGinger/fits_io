@@ -28,8 +28,11 @@ READER_BY_SUFFIX: dict[str, Type[ImageReader]] = {
     ".nd2": Nd2Reader,
 }
 
-def get_reader(path: str | Path, channel_labels: list[str] | None = None) -> ImageReader:
-    """Return an ImageReader instance for the given path, based on suffix."""
+
+def get_reader(path: str | Path) -> ImageReader:
+    """
+    Return an ImageReader instance for the given path, based on suffix.
+    """
     p = Path(path)
     
     if not p.exists() or not p.is_file():
@@ -42,10 +45,9 @@ def get_reader(path: str | Path, channel_labels: list[str] | None = None) -> Ima
     except KeyError as e:
         supported = ", ".join(sorted(READER_BY_SUFFIX))
         raise UnsupportedFileTypeError(
-            f"Unsupported file type: {suffix!r}. Supported: {supported}"
-        ) from e
+            f"Unsupported file type: {suffix!r}. Supported: {supported}") from e
 
-    return reader_cls(p, _channel_labels=channel_labels)
+    return reader_cls(p)
 
 
 

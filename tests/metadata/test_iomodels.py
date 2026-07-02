@@ -1,6 +1,7 @@
 import pytest
 
-from fits_io.metadata.models import ChannelMeta, InfoSummary, ResolutionMeta, StackMeta
+from fits_io.metadata.imageJ_meta import InfoSummary
+from fits_io.metadata.tiff_meta import ChannelMeta, ResolutionMeta, StackMeta
 
 # -------------------------
 # StackMeta
@@ -109,19 +110,16 @@ def test_infosummary_renders_generic_fits_metadata_block():
 
     rendered = summary.render()
     assert "FITS METADATA" in rendered
-    assert "channel labels = ['GFP', 'RFP']" in rendered
-    assert "fits_io version = 1.2.3" in rendered
-    assert "axes = TCYX" in rendered
-    assert "z_projection = max" in rendered
-    assert "compression = zlib" in rendered
-    assert "source channel indices = [0, 2]" in rendered
-    assert "source channel count = 3" in rendered
-    assert "--- Project Metadata ---" in rendered
-    assert "\n---\nrun = \"A\"" in rendered
-    assert "\n---\nnotes = [\"x\", \"y\"]" in rendered
-    assert "\n---\n[tracking]" in rendered
+    assert 'channel_labels = ["GFP", "RFP"]' in rendered
+    assert 'version = "1.2.3"' in rendered
+    assert 'axes = "TCYX"' in rendered
+    assert 'z_projection = "max"' in rendered
+    assert 'compression = "zlib"' in rendered
+    assert "source_channel_indices = [0, 2]" in rendered
+    assert "source_channel_count = 3" in rendered
+    assert "[project_metadata]" in rendered
     assert 'run = "A"' in rendered
-    assert '[tracking]' in rendered
+    assert '[project_metadata.tracking]' in rendered
     assert 'threshold = 0.7' in rendered
-    assert '[tracking.post]' in rendered
+    assert '[project_metadata.tracking.post]' in rendered
     assert 'min_length = 3' in rendered

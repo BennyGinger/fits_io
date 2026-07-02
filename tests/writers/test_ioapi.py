@@ -1,115 +1,120 @@
-# tests/test_writer.py
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from fits_io.writers import api
-
-
+from fits_io.metadata.models import FitsIOPayload
+from fits_io.writers import apis
 
 
 # -----------------------------------
-# High-level: convert_to_fits_tif()
+# convert_to_fits_tif()
 # -----------------------------------
 
-def test_convert_to_fits_tif_returns_output_paths(writer_harness, dummy_reader) -> None:
-    out = api.convert_to_fits_tif(dummy_reader)
+def test_convert_to_fits_tif_returns_output_paths(monkeypatch, dummy_reader) -> None:
+    out_path = dummy_reader.img_path.with_name("fits.tif")
+    monkeypatch.setattr(apis, "build_output_paths", lambda _series, _name: [out_path])
+    monkeypatch.setattr(apis, "save_tiff", lambda *_args, **_kwargs: None)
 
-    assert out == [writer_harness.save_dirs[0] / "fits.tif"]
-    assert len(writer_harness.saved) == 1
+    out = apis.convert_to_fits_tif(dummy_reader)
+
+    assert out == [out_path]
 
 
-def test_convert_to_fits_tif_writes_one_file_per_series(writer_harness, dummy_reader) -> None:
-    s1 = writer_harness.tmp_path / "img_s1"
-    s2 = writer_harness.tmp_path / "img_s2"
-    writer_harness.save_dirs = [s1, s2]
+def test_convert_to_fits_tif_writes_one_file_per_series(monkeypatch, dummy_reader) -> None:
+    s1 = dummy_reader.img_path.with_name("img_s1") / "fits.tif"
+    s2 = dummy_reader.img_path.with_name("img_s2") / "fits.tif"
 
-    a1 = np.ones((3, 3), dtype=np.uint8)
-    a2 = np.ones((3, 3), dtype=np.uint8) * 2
-    writer_harness.arrays = [a1, a2]
+    r1 = type(dummy_reader)(img_path=dummy_reader.img_path, series_idx=0)
+    r2 = type(dummy_reader)(img_path=dummy_reader.img_path, series_idx=1)
+    monkeypatch.setattr(dummy_reader, "split_series", lambda: [r1, r2])
 
-    out_paths = api.convert_to_fits_tif(
-        dummy_reader,
-        output_name="fits.tif",
-        compression="zlib",
+    monkeypatch.setattr(apis, "build_output_paths", lambda _series, _name: [s1, s2])
+
+    saved: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        apis,
+        "save_tiff",
+        lambda array, path, _meta, compression=None: saved.append({"array": array, "path": path, "compression": compression}),
     )
 
-    assert out_paths == [s1 / "fits.tif", s2 / "fits.tif"]
-    assert [c["path"] for c in writer_harness.saved] == [s1 / "fits.tif", s2 / "fits.tif"]
-    assert [c["array"] for c in writer_harness.saved] == [a1, a2]
-    assert [c["compression"] for c in writer_harness.saved] == ["zlib", "zlib"]
+    out = apis.convert_to_fits_tif(dummy_reader, output_name="fits.tif", compression="zlib")
 
-    # sanity: metadata built for both series_index values
-    assert [kw.get("series_index") for kw in writer_harness.md_calls] == [0, 1]
+    assert out == [s1, s2]
+    assert [x["path"] for x in saved] == [s1, s2]
+    assert [x["compression"] for x in saved] == ["zlib", "zlib"]
 
 
-def test_convert_to_fits_tif_sets_source_channel_identity_for_all_channels(writer_harness, dummy_reader) -> None:
-    writer_harness.used_channels = ["C_1", "C_2", "C_3"]
-    writer_harness.used_indices = [0, 1, 2]
-    api.convert_to_fits_tif(dummy_reader)
-    assert writer_harness.md_calls[0]["source_channel_count"] == 3
-    assert writer_harness.md_calls[0]["source_channel_indices"] == [0, 1, 2]
+def test_convert_to_fits_tif_sets_source_channel_identity_for_subset(monkeypatch, dummy_reader) -> None:
+    monkeypatch.setattr(apis, "build_output_paths", lambda _series, _name: [dummy_reader.img_path.with_name("fits.tif")])
+    monkeypatch.setattr(apis, "save_tiff", lambda *_args, **_kwargs: None)
+
+    built: list[dict[str, object]] = []
+
+    def fake_build_payload(base: FitsIOPayload, **kwargs):
+        built.append(kwargs)
+        return base.with_fitsio(**{k: v for k, v in kwargs.items() if k in {
+            "axes", "channel_labels", "n_channels", "source_channel_indices", "source_channel_count", "z_projection", "compression"
+        }})
+
+    monkeypatch.setattr(apis, "build_payload", fake_build_payload)
+
+    apis.convert_to_fits_tif(
+        dummy_reader,
+        channel_labels=["DAPI", "GFP", "RFP"],
+        export_channels=["GFP", "RFP"],
+    )
+
+    assert built[0]["source_channel_count"] == 3
+    assert built[0]["source_channel_indices"] == [1, 2]
 
 
-def test_convert_to_fits_tif_sets_source_channel_identity_for_subset(writer_harness, dummy_reader) -> None:
-    writer_harness.used_channels = ["GFP", "RFP"]
-    writer_harness.used_indices = [1, 2]
-    writer_harness.export_all_flag = False
-    api.convert_to_fits_tif(dummy_reader, channel_labels=["DAPI", "GFP", "RFP"], export_channels=["GFP", "RFP"])
-    assert writer_harness.md_calls[0]["source_channel_count"] == 3
-    assert writer_harness.md_calls[0]["source_channel_indices"] == [1, 2]
+def test_convert_to_fits_tif_passes_custom_metadata(monkeypatch, dummy_reader) -> None:
+    monkeypatch.setattr(apis, "build_output_paths", lambda _series, _name: [dummy_reader.img_path.with_name("fits.tif")])
+    monkeypatch.setattr(apis, "save_tiff", lambda *_args, **_kwargs: None)
 
+    seen: list[dict[str, object]] = []
 
-def test_convert_to_fits_tif_passes_project_metadata(writer_harness, dummy_reader) -> None:
-    api.convert_to_fits_tif(dummy_reader, project_metadata={"run_id": 7})
-    payload_kwargs = writer_harness.saved[0]["meta"].imagej_meta["kwargs"]["payload"]["kwargs"]
-    assert payload_kwargs["project_metadata"] == {"run_id": 7}
+    def fake_build_payload(base: FitsIOPayload, **kwargs):
+        seen.append(kwargs)
+        return base.with_custom_metadata(kwargs.get("custom_metadata"))
+
+    monkeypatch.setattr(apis, "build_payload", fake_build_payload)
+
+    apis.convert_to_fits_tif(dummy_reader, custom_metadata={"run_id": 7})
+
+    assert seen[0]["custom_metadata"] == {"run_id": 7}
 
 
 # -----------------------------------
-# apply_zproj()
-# -----------------------------------
-
-def test_apply_zproj_raises_on_multi_series(writer_harness_tiff, dummy_reader) -> None:
-    """Test that apply_zproj raises ValueError for multi-series."""
-    dummy_reader.array = [np.ones((3, 3), dtype=np.uint8), np.ones((3, 3), dtype=np.uint8)]
-
-    with pytest.raises(ValueError, match="Expected a single array"):
-        api.apply_zproj(dummy_reader, "max")
-
-
-# -----------------------------------
-# set_channel_labels()
+# apply_zproj() / set_channel_labels()
 # -----------------------------------
 
 def test_set_channel_labels_raises_on_non_tiff_reader(dummy_reader) -> None:
-    """Test that set_channel_labels raises TypeError for non-TiffReader."""
     with pytest.raises(TypeError, match="only supports .tif/.tiff files"):
-        api.set_channel_labels(dummy_reader, ["DAPI", "GFP"])
+        apis.set_channel_labels(dummy_reader, ["DAPI", "GFP"])
 
 
-def test_set_channel_labels_raises_on_multi_series(writer_harness_tiff, dummy_reader) -> None:
-    """Test that set_channel_labels raises ValueError for multi-series."""
-    dummy_reader.array = [np.ones((3, 3), dtype=np.uint8), np.ones((3, 3), dtype=np.uint8)]
-    
-    with pytest.raises(ValueError, match="Expected a single array"):
-        api.set_channel_labels(dummy_reader, ["DAPI", "GFP"])
+def test_apply_zproj_raises_on_non_tiff_reader(dummy_reader) -> None:
+    with pytest.raises(TypeError, match="only supports .tif/.tiff files"):
+        apis.apply_zproj(dummy_reader, "max")
 
 
-def test_set_channel_labels_sets_valid_labels(writer_harness_tiff, dummy_reader) -> None:
-    """Test that set_channel_labels successfully sets labels."""
-    api.set_channel_labels(dummy_reader, ["DAPI", "GFP", "RFP"])
-    
-    # Check that save_tiff was called
-    assert len(writer_harness_tiff.saved) == 1
-    assert writer_harness_tiff.saved[0]["path"] == dummy_reader.img_path
-    assert "source_channel_indices" not in writer_harness_tiff.md_calls[0]
-    assert "source_channel_count" not in writer_harness_tiff.md_calls[0]
+def test_set_channel_labels_sets_valid_labels(monkeypatch, dummy_reader) -> None:
+    monkeypatch.setattr(apis, "TiffReader", type(dummy_reader))
+
+    saved: list[object] = []
+    monkeypatch.setattr(apis, "save_tiff", lambda *_args, **_kwargs: saved.append(True))
+
+    apis.set_channel_labels(dummy_reader, ["DAPI", "GFP", "RFP"])
+    assert len(saved) == 1
 
 
-def test_apply_zproj_does_not_explicitly_set_source_channel_identity(writer_harness_tiff, dummy_reader) -> None:
-    api.apply_zproj(dummy_reader, "max")
-    assert len(writer_harness_tiff.saved) == 1
-    assert "source_channel_indices" not in writer_harness_tiff.md_calls[0]
-    assert "source_channel_count" not in writer_harness_tiff.md_calls[0]
+def test_apply_zproj_saves_projected_array(monkeypatch, dummy_reader) -> None:
+    monkeypatch.setattr(apis, "TiffReader", type(dummy_reader))
+
+    saved: list[object] = []
+    monkeypatch.setattr(apis, "save_tiff", lambda *_args, **_kwargs: saved.append(True))
+
+    apis.apply_zproj(dummy_reader, "max")
+    assert len(saved) == 1

@@ -22,7 +22,7 @@ def test_nd2_resolution_defensive(monkeypatch, tmp_path: Path, nd2_meta_factorie
     monkeypatch.setattr(nd2, "ND2File", fake_nd2_file_meta(nd2_meta_factories[meta_key]))
 
     r = Nd2Reader(p)
-    assert r.resolution == [expected]
+    assert r.resolution == expected
 
 
 def test_nd2_interval_timeloop(monkeypatch, tmp_path: Path, fake_nd2_file_timeloop):
@@ -61,8 +61,8 @@ def test_nd2_get_channel_single_channel_without_c_axis_returns_full_array(monkey
     monkeypatch.setattr(nd2, "ND2File", fake_nd2_file_noP)
     monkeypatch.setattr(nd2, "imread", lambda path, dask=False: np.zeros((2, 5, 6), dtype=np.uint16))
 
-    r = Nd2Reader(p, _channel_labels=["GFP"])
-    out = r.get_channel("GFP")
+    r = Nd2Reader(p)
+    out = r.get_channel(0)
 
     assert isinstance(out, np.ndarray)
     assert out.shape == (2, 5, 6)
@@ -73,8 +73,8 @@ def test_nd2_normalize_channels_valid_int(monkeypatch, tmp_path, fake_nd2_file_3
     monkeypatch.setattr(nd2, "ND2File", fake_nd2_file_3channels)
     
     r = Nd2Reader(p)
-    assert r._normalize_channels(1) == [1]
-    assert r._normalize_channels([0, 2]) == [0, 2]
+    assert r._normalize_channel_indices(1) == [1]
+    assert r._normalize_channel_indices([0, 2]) == [0, 2]
 
 def test_nd2_normalize_channels_invalid_int(monkeypatch, tmp_path, fake_nd2_file_3channels):
     p = tmp_path / "x.nd2"
@@ -83,25 +83,7 @@ def test_nd2_normalize_channels_invalid_int(monkeypatch, tmp_path, fake_nd2_file
     
     r = Nd2Reader(p)
     with pytest.raises(IndexError, match="out of range"):
-        r._normalize_channels(5)
-
-def test_nd2_normalize_channels_by_label(monkeypatch, tmp_path, fake_nd2_file_with_labels):
-    p = tmp_path / "x.nd2"
-    p.write_bytes(b"fake")
-    monkeypatch.setattr(nd2, "ND2File", fake_nd2_file_with_labels)
-    
-    r = Nd2Reader(p, _channel_labels=["DAPI", "GFP", "RFP"])
-    assert r._normalize_channels("GFP") == [1]
-    assert r._normalize_channels(["DAPI", "RFP"]) == [0, 2]
-
-def test_nd2_normalize_channels_label_not_supported(monkeypatch, tmp_path, fake_nd2_file_no_native_labels):
-    p = tmp_path / "x.nd2"
-    p.write_bytes(b"fake")
-    monkeypatch.setattr(nd2, "ND2File", fake_nd2_file_no_native_labels)
-    
-    r = Nd2Reader(p)  # no channel_labels provided
-    with pytest.raises(ValueError, match="does not support native channel labels"):
-        r._normalize_channels("DAPI")
+        r._validate_channel_indices([5])
 
 
 def test_nd2_axes_repeated_per_series(monkeypatch, tmp_path: Path, fake_nd2_file_basic):
@@ -110,8 +92,8 @@ def test_nd2_axes_repeated_per_series(monkeypatch, tmp_path: Path, fake_nd2_file
     monkeypatch.setattr(nd2, "ND2File", fake_nd2_file_basic)
 
     r = Nd2Reader(p)
-    assert r.series_number == 2
-    assert r.axes == ["TZCYX", "TZCYX"]
+    assert r.series_count == 2
+    assert r.axes == "TZCYX"
 
 
 def test_nd2_resolution_repeated_per_series(monkeypatch, tmp_path: Path, fake_nd2_file_basic):
@@ -120,5 +102,5 @@ def test_nd2_resolution_repeated_per_series(monkeypatch, tmp_path: Path, fake_nd
     monkeypatch.setattr(nd2, "ND2File", fake_nd2_file_basic)
 
     r = Nd2Reader(p)
-    assert r.series_number == 2
-    assert r.resolution == [(0.3223, 0.3223), (0.3223, 0.3223)]
+    assert r.series_count == 2
+    assert r.resolution == (0.3223, 0.3223)

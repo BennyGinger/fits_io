@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from importlib.metadata import PackageNotFoundError, version
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import Any, Mapping
 
+from fits_io.metadata.models import FitsIOPayload
 from fits_io.readers._types import Zproj
-
-if TYPE_CHECKING:
-    from fits_io.metadata.context import MetadataBuildContext
 
 
 def _get_fits_io_version() -> str:
@@ -16,35 +15,51 @@ def _get_fits_io_version() -> str:
         return "unknown"
 
 
-def build_private_payload(ctx: MetadataBuildContext, *, project_metadata: Mapping[str, Any] | None = None, z_projection: Zproj = None, compression: str | None = None) -> dict[str, Any]:
+def build_payload(base: FitsIOPayload, 
+                  *, 
+                  axes: str | None = None, 
+                  channel_labels: Sequence[str] | None = None, 
+                  n_channels: int | None = None, 
+                  source_channel_indices: Sequence[int] | None = None, 
+                  source_channel_count: int | None = None, 
+                  z_projection: Zproj = None, 
+                  custom_metadata: Mapping[str, Any] | None = None, 
+                  compression: str | None = None
+                  ) -> FitsIOPayload:
     """
-    Build private metadata payload from generic context and caller-owned metadata.
+    Build a new FitsIOPayload with the provided metadata (either empty or exising metadata). 
+    
+    Args:
+        base (FitsIOPayload): The base payload to build upon. Can be an empty payload or an existing payload with metadata.
+        axes (str): The axes string representing the order of dimensions in the image data.
+        channel_labels (Sequence[str]): The list of channel labels.
+        n_channels (int): The current number of channels in the image data.
+        source_channel_indices (Sequence[int]): The indices of the channels in the source image data.
+        source_channel_count (int): The total number of channels in the source image data.
+        z_projection (Zproj, optional): The z-projection method used for the image data. Defaults to None.
+        custom_metadata (Mapping[str, Any], optional): Additional custom metadata to include in the payload. Defaults to None.
+        compression (str, optional): The compression method used for the image data. Defaults to None.
+        
+    Returns:
+        FitsIOPayload: A new payload containing the provided metadata, preserving any existing metadata in the base payload, and adding or updating any custom metadata.
     """
-    payload = dict(ctx.base_payload)
-    existing_fits_io_raw = payload.get("fits_io")
-    existing_fits_io = dict(existing_fits_io_raw) if isinstance(existing_fits_io_raw, Mapping) else {}
-    src_chan_indices = (
-        ctx.source_channel_indices
-        if ctx.source_channel_indices is not None
-        else existing_fits_io.get("source_channel_indices")
-    )
-    src_chan_count = (
-        ctx.source_channel_count
-        if ctx.source_channel_count is not None
-        else existing_fits_io.get("source_channel_count")
-    )
+    payload = base.with_fitsio(
+        version=_get_fits_io_version(),
+        axes=axes,
+        channel_labels=channel_labels,
+        n_channels=n_channels,
+        source_channel_indices=source_channel_indices,
+        source_channel_count=source_channel_count,
+        z_projection=z_projection,
+        compression=compression,)
 
-    payload["fits_io"] = {
-        **existing_fits_io,
-        "version": _get_fits_io_version(),
-        "axes": ctx.axes,
-        "channel_labels": ctx.labels,
-        "n_channels": ctx.n_channels,
-        "z_projection": z_projection,
-        "compression": compression,
-        "source_channel_indices": src_chan_indices,
-        "source_channel_count": src_chan_count,
-    }
-    if project_metadata:
-        payload["project_metadata"] = dict(project_metadata)
+    if custom_metadata is None:
+        custom_metadata = base.custom_metadata
+    
+    payload = payload.with_custom_metadata(custom_metadata)
+
     return payload
+
+
+
+

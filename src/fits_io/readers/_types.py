@@ -19,4 +19,13 @@ SUPPORTED_EXTENSIONS: set[ExtTags] = set(get_args(ExtTags))
 
 Zproj = Literal['max', 'mean', None]
 
-ArrAxis = Literal['P', 'C', 'Z', 'T', 'X', 'Y']
+_ALLOWED_AXIS = {'C', 'Z', 'T', 'X', 'Y'}
+
+def validate_axes(axes: str) -> None:
+    """
+    Validate that the axes string contains only allowed characters.
+    Raises ValueError if invalid axes are found.
+    """
+    invalid_axes = set(axes) - _ALLOWED_AXIS
+    if invalid_axes:
+        raise ValueError(f"Invalid axes: {invalid_axes}. Allowed: {_ALLOWED_AXIS}")
