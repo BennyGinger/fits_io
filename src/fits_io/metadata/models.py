@@ -7,16 +7,18 @@ from fits_io.readers._types import Zproj, validate_axes
 
 
 @dataclass(slots=True, frozen=True)
-class FitsIOMetadata:
+class ArtifactMeta:
     """
     Metadata container specific to fits_io.
     """
+    artifact_type: str | None = None
+    created_by: str | None = None
     version: str | None = None
+    derived_from: str | None = None
     axes: str | None = None
     channel_labels: list[str] | None = None
-    n_channels: int | None = None
-    source_channel_indices: list[int] | None = None
-    source_channel_count: int | None = None
+    src_channel_indices: list[int] | None = None
+    src_channel_count: int | None = None
     z_projection: Zproj = None
     compression: str | None = None
 
@@ -24,14 +26,23 @@ class FitsIOMetadata:
         if self.axes is not None:
             validate_axes(self.axes)
     
+    @property
+    def channel_count(self) -> int | None:
+        """Return the number of channels in the artifact, if available."""
+        if self.channel_labels is not None:
+            return len(self.channel_labels)
+        return None
+    
     def to_dict(self) -> dict[str, Any]:
         return {
+            "artifact_type": self.artifact_type,
+            "created_by": self.created_by,
             "version": self.version,
+            "derived_from": self.derived_from,
             "axes": self.axes,
             "channel_labels": self.channel_labels,
-            "n_channels": self.n_channels,
-            "source_channel_indices": self.source_channel_indices,
-            "source_channel_count": self.source_channel_count,
+            "src_channel_indices": self.src_channel_indices,
+            "src_channel_count": self.src_channel_count,
             "z_projection": self.z_projection,
             "compression": self.compression,
         }
@@ -42,7 +53,7 @@ class FitsIOPayload:
     """
     Container for fits_io-specific metadata and any additional custom metadata. Represent the ground truth metadata for the image.
     """
-    fits_io: FitsIOMetadata = field(default_factory=FitsIOMetadata)
+    fits_io: ArtifactMeta = field(default_factory=ArtifactMeta)
     custom_metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -55,7 +66,7 @@ class FitsIOPayload:
         if not isinstance(fits_io_dict, Mapping):
             fits_io_dict = {}
     
-        fits_io_meta = FitsIOMetadata(**fits_io_dict)
+        fits_io_meta = ArtifactMeta(**fits_io_dict)
         
         custom_metadata = payload_dict.get("custom_metadata", {})
         if not isinstance(custom_metadata, Mapping):
@@ -84,29 +95,33 @@ class FitsIOPayload:
     
     def with_fitsio(self, 
                      *, 
-                     version: str | None = None, 
+                     artifact_type: str | None = None, 
+                     created_by: str | None = None,
+                     version: str | None = None,
+                     derived_from: str | None = None,
                      axes: str | None = None, 
                      channel_labels: Sequence[str] | None = None, 
-                     n_channels: int | None = None, 
-                     source_channel_indices: Sequence[int] | None = None, 
-                     source_channel_count: int | None = None, 
-                     z_projection: str | None = None, 
+                     src_channel_indices: Sequence[int] | None = None, 
+                     src_channel_count: int | None = None, 
+                     z_projection: Zproj = None, 
                      compression: str | None = None
                      ) -> Self:
         """
         Return a new FitsIOPayload instance with updated fits_io metadata. If a parameter is None, the existing value is retained.
         """
         return replace(self,
-                       fits_io=replace(self.fits_io,
-                                       version=version if version is not None else self.fits_io.version,
-                                       axes=axes if axes is not None else self.fits_io.axes,
-                                       channel_labels=list(channel_labels) if channel_labels is not None else self.fits_io.channel_labels,
-                                       n_channels=n_channels if n_channels is not None else self.fits_io.n_channels,
-                                       source_channel_indices=list(source_channel_indices) if source_channel_indices is not None else self.fits_io.source_channel_indices,
-                                       source_channel_count=source_channel_count if source_channel_count is not None else self.fits_io.source_channel_count,
-                                       z_projection=z_projection if z_projection is not None else self.fits_io.z_projection,
-                                       compression=compression if compression is not None else self.fits_io.compression,),
-                       )
+            fits_io=replace(self.fits_io,
+                            artifact_type=artifact_type if artifact_type is not None else self.fits_io.artifact_type,
+                            created_by=created_by if created_by is not None else self.fits_io.created_by,
+                            version=version if version is not None else self.fits_io.version,
+                            derived_from=derived_from if derived_from is not None else self.fits_io.derived_from,
+                            axes=axes if axes is not None else self.fits_io.axes,
+                            channel_labels=list(channel_labels) if channel_labels is not None else self.fits_io.channel_labels,
+                            src_channel_indices=list(src_channel_indices) if src_channel_indices is not None else self.fits_io.src_channel_indices,
+                            src_channel_count=src_channel_count if src_channel_count is not None else self.fits_io.src_channel_count,
+                            z_projection=z_projection if z_projection is not None else self.fits_io.z_projection,
+                            compression=compression if compression is not None else self.fits_io.compression,),
+    )
     
     def with_custom_metadata(self, custom_metadata: Mapping[str, Any] | None) -> Self:
         """

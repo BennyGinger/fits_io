@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 
 from fits_io.metadata.models import FitsIOPayload
 import numpy as np

@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Any, cast
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 import json
 import logging

@@ -103,7 +103,7 @@ def assemble_tiff_metadata(payload: FitsIOPayload, interval: float | None, resol
     """
     fits_io = payload.fits_io
 
-    channel_meta = ChannelMeta(channel_number=fits_io.n_channels or 1,
+    channel_meta = ChannelMeta(channel_number=fits_io.channel_count or 1,
                                labels=fits_io.channel_labels)
     resolution_meta = ResolutionMeta(resolution)
     stack_meta = StackMeta(axes=fits_io.axes or "YX",

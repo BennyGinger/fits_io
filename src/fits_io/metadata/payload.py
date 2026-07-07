@@ -8,9 +8,10 @@ from fits_io.metadata.models import FitsIOPayload
 from fits_io.readers._types import Zproj
 
 
-def _get_fits_io_version() -> str:
+def _get_dist_version(distribution: str | None) -> str:
+    dist = distribution or "fits_io"
     try:
-        return version("fits_io")
+        return version(dist)
     except PackageNotFoundError:
         return "unknown"
 
@@ -18,8 +19,10 @@ def _get_fits_io_version() -> str:
 def build_payload(base: FitsIOPayload, 
                   *, 
                   axes: str | None = None, 
-                  channel_labels: Sequence[str] | None = None, 
-                  n_channels: int | None = None, 
+                  channel_labels: Sequence[str] | None = None,
+                  artifact_type: str | None = None,
+                  created_by: str | None = None,
+                  derived_from: str | None = None,
                   source_channel_indices: Sequence[int] | None = None, 
                   source_channel_count: int | None = None, 
                   z_projection: Zproj = None, 
@@ -30,8 +33,7 @@ def build_payload(base: FitsIOPayload,
     Build a new FitsIOPayload with the provided metadata (either empty or exising metadata). 
     
     Args:
-        base (FitsIOPayload): The base payload to build upon. Can be an empty payload or an existing payload with metadata.
-        axes (str): The axes string representing the order of dimensions in the image data.
+        base (FitsIOPayload): The base payload to build upon. Can be an empty payload or axes (str): The axes string representing the order of dimensions in the image data.
         channel_labels (Sequence[str]): The list of channel labels.
         n_channels (int): The current number of channels in the image data.
         source_channel_indices (Sequence[int]): The indices of the channels in the source image data.
@@ -44,12 +46,14 @@ def build_payload(base: FitsIOPayload,
         FitsIOPayload: A new payload containing the provided metadata, preserving any existing metadata in the base payload, and adding or updating any custom metadata.
     """
     payload = base.with_fitsio(
-        version=_get_fits_io_version(),
+        artifact_type=artifact_type,
+        created_by=created_by,
+        version=_get_dist_version(created_by),
+        derived_from=derived_from,
         axes=axes,
         channel_labels=channel_labels,
-        n_channels=n_channels,
-        source_channel_indices=source_channel_indices,
-        source_channel_count=source_channel_count,
+        src_channel_indices=source_channel_indices,
+        src_channel_count=source_channel_count,
         z_projection=z_projection,
         compression=compression,)
 

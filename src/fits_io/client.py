@@ -82,7 +82,8 @@ class FitsIO:
             channel_labels : New channel labels to set, either a single string for one channel or a sequence of strings for multiple channels.
             compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'.
         """
-        set_channel_labels(self.reader, channel_labels, compression=compression)
+        path = set_channel_labels(self.reader, channel_labels, compression=compression)
+        self.reader = get_reader(path)  # Reload the reader to reflect updated metadata.
     
     
     def get_array(self, z_projection: Zproj = None) -> NDArray[Any]:
@@ -118,14 +119,16 @@ class FitsIO:
             z_projection : The z-projection method to apply ('max', 'mean', or None). If None, no projection is applied.
             compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'.
         """
-        apply_zproj(self.reader, z_projection, compression=compression)
+        path = apply_zproj(self.reader, z_projection, compression=compression)
+        self.reader = get_reader(path)  # Reload the reader to reflect updated metadata.
     
     
     def convert_to_fits(self, 
                         *, 
                         output_name: str = DEFAULT_OUTPUT_NAME, 
                         channel_labels: str | Sequence[str] | None = None,
-                        export_channels: str | Sequence[str] = 'all', 
+                        export_channels: str | Sequence[str] = 'all',
+                        artifact_type: str = "image",
                         custom_metadata: Mapping[str, Any] | None = None, 
                         z_projection: Zproj = None, 
                         compression: str | None = 'zlib'
@@ -134,11 +137,12 @@ class FitsIO:
         Convert an image file to a FITS TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
         Args:
             output_name : Optional name of the output TIFF file.
-        channel_labels : Optional labels for source channels (used for mapping), if None, default labels will be used. 
-        export_channels : Subset channels to export. Can be 'all' or a list of channel labels, by default 'all'.
-        custom_metadata : Additional custom metadata to include in the TIFF file, by default None.
-        z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
-        compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'.
+            channel_labels : Optional labels for source channels (used for mapping), if None, default labels will be used. 
+            export_channels : Subset channels to export. Can be 'all' or a list of channel labels, by default 'all'.
+            artifact_type : Type of artifact to set in the metadata, by default "image".
+            custom_metadata : Additional custom metadata to include in the TIFF file, by default None.
+            z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
+            compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'.
         Returns:
             List of Paths of the saved TIFF files.
         """
@@ -146,6 +150,7 @@ class FitsIO:
                             output_name=output_name,
                             channel_labels=channel_labels, 
                             export_channels=export_channels,
+                            artifact_type=artifact_type,
                             custom_metadata=custom_metadata,
                             z_projection=z_projection, 
                             compression=compression)
@@ -154,10 +159,14 @@ class FitsIO:
 
     def save_array(self, 
                    array: NDArray, 
+                   export_channels: str | Sequence[str],
                    output_name: str = DEFAULT_OUTPUT_NAME, 
                    *, 
+                   artifact_type: str | None = None,
+                   created_by: str | None = None,
                    custom_metadata: Mapping[str, Any] | None = None,
-                   compression: str | None = 'zlib') -> Path:
+                   compression: str | None = 'zlib'
+                   ) -> Path:
         """
         Save the given array to a FITS TIFF file with ImageJ metadata.
         
@@ -167,9 +176,11 @@ class FitsIO:
         - Multi-series inputs are not supported here by design.
         
         Args:
-            img_reader : An ImageReader instance for the input image.
             array : The NumPy array to save.
             output_name : Optional name of the output TIFF file.
+            artifact_type : Type of artifact to set in the metadata, by default None.
+            created_by : Optional string to set as the creator in the metadata (e.g. distributor), by default None.
+            export_channels : Subset channels to export. Can be 'all' or a list of channel labels, by default 'all'.
             custom_metadata : Additional custom metadata to include in the TIFF file, by default None.
             compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'.
         
@@ -179,6 +190,9 @@ class FitsIO:
         return save_array(self.reader, 
                           array,
                           output_name=output_name,
+                          artifact_type=artifact_type,
+                          created_by=created_by,
+                          export_channels=export_channels,
                           custom_metadata=custom_metadata,
                           compression=compression)
     
@@ -206,3 +220,15 @@ class FitsIO:
             else:
                 raise TypeError(f"Expected int or str channel, got {type(ch).__name__}")
         return indices
+
+
+if __name__ == "__main__":
+    path = Path("/media/ben/Analysis/Python/Images/nd2/Run2/c2z25t23v1_nd2.nd2")
+    
+    reader = FitsIO.from_path(path)
+    file_path = reader.convert_to_fits(output_name="test_output.tif")
+    
+    read2 = FitsIO.from_path(file_path[0])
+    read2.set_channel_labels(["RFP", "yellow"])
+    red = read2.get_channel("RFP")
+    read2.save_array(red, output_name="red_channel.tif", export_channels="RFP", custom_metadata={"note": "red channel only"})
