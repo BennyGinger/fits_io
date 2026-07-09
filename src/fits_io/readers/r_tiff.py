@@ -6,7 +6,7 @@ import json
 import logging
 
 from fits_io.metadata.codec import FITS_TAG
-from fits_io.metadata.models import FitsIOPayload
+from fits_io.metadata.models import FitsIOMeta
 import numpy as np
 from numpy.typing import NDArray
 from tifffile import TiffFile, TiffPage, TiffPageSeries, COMPRESSION, TiffTag
@@ -30,7 +30,7 @@ class TiffReader(ImageReader):
     _compression_method: str | None = field(init=False)
     _resolution: PixelSize | None = field(init=False)
     _imageJ_meta: dict[str, Any] = field(init=False)
-    _metadata: FitsIOPayload = field(init=False)
+    _metadata: FitsIOMeta = field(init=False)
     
     @classmethod
     def can_read(cls, path: Path) -> bool:
@@ -92,18 +92,18 @@ class TiffReader(ImageReader):
         y_um_per_pix = round(1./float(yres), 4)
         return (x_um_per_pix, y_um_per_pix)
     
-    def _get_metadata_from_tags(self, meta_tag: TiffTag | None) -> FitsIOPayload:
+    def _get_metadata_from_tags(self, meta_tag: TiffTag | None) -> FitsIOMeta:
         if meta_tag is None:
-            return FitsIOPayload()
+            return FitsIOMeta()
         
         v = meta_tag.value
         if isinstance(v, (bytes, bytearray)):
             v = v.decode("utf-8", "replace")
         try:
-            return FitsIOPayload.from_dict(json.loads(v))
+            return FitsIOMeta.from_dict(json.loads(v))
         except Exception:
             logger.warning("FITS_TAG present but not valid JSON")
-            return FitsIOPayload()
+            return FitsIOMeta()
     
     @property
     def compression_method(self) -> str | None:
@@ -133,7 +133,7 @@ class TiffReader(ImageReader):
         return self._imageJ_meta.get('finterval', None)
     
     @property
-    def metadata(self) -> FitsIOPayload:
+    def metadata(self) -> FitsIOMeta:
         return self._metadata
     
     def get_array(self, z_projection: Zproj = None) -> NDArray[Any]:

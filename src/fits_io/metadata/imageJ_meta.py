@@ -89,7 +89,7 @@ class InfoSummary:
         delimiter = "----------------------"
         lines = [
             delimiter,
-            "FITS METADATA",
+            "ARTIFACT METADATA",
             delimiter,
             "",
         ]

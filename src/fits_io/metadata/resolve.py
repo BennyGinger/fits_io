@@ -37,7 +37,7 @@ class ChannelSelection:
 
         c_index = axes.find('C')
         if c_index == -1:
-            if self.export_indices != [0]:
+            if len(self.export_indices) > 1:
                 raise ValueError(f"Array has no channel axis, but export indices are {self.export_indices}.")
             else:
                 return  # No channel axis and only one channel selected, valid case.
@@ -81,14 +81,14 @@ def resolve_output_axes(reader_axes: str, z_projection: Zproj, n_channels: int) 
     return axes
 
 
-def remap_source_indices(existing: list[int] | None, selected: list[int]) -> list[int]:
+def remap_channel_indices(current_artifact_indices: list[int] | None, selected_local_indices: list[int]) -> list[int]:
     """
     Remap the selected indices to the existing indices if provided. If existing is None, return
     the selected indices as is.
     """
-    if existing is None:
-        return selected
-    return [existing[i] for i in selected]
+    if current_artifact_indices is None:
+        return selected_local_indices
+    return [current_artifact_indices[i] for i in selected_local_indices]
 
 
 ############ Private helper functions ###########################

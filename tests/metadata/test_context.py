@@ -1,10 +1,10 @@
-from fits_io.metadata.models import FitsIOPayload
-from fits_io.metadata.payload import build_payload
+from fits_io.metadata.models import FitsIOMeta
+from fits_io.metadata.payload import assemble_payload
 
 
 def test_build_payload_sets_requested_fits_io_fields():
-    base = FitsIOPayload()
-    out = build_payload(
+    base = FitsIOMeta()
+    out = assemble_payload(
         base,
         axes="TCYX",
         channel_labels=["GFP", "RFP"],
@@ -25,14 +25,14 @@ def test_build_payload_sets_requested_fits_io_fields():
 
 
 def test_build_payload_merges_custom_metadata_when_provided():
-    base = FitsIOPayload(custom_metadata={"legacy": 1})
-    out = build_payload(base, custom_metadata={"run_id": 7})
+    base = FitsIOMeta(custom_metadata={"legacy": 1})
+    out = assemble_payload(base, custom_metadata={"run_id": 7})
 
     assert out.custom_metadata == {"legacy": 1, "run_id": 7}
 
 
 def test_build_payload_preserves_base_custom_metadata_when_custom_missing():
-    base = FitsIOPayload(custom_metadata={"legacy": "keep"})
-    out = build_payload(base)
+    base = FitsIOMeta(custom_metadata={"legacy": "keep"})
+    out = assemble_payload(base)
 
     assert out.custom_metadata == {"legacy": "keep"}

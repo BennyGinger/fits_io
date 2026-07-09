@@ -17,10 +17,9 @@ class ArtifactMeta:
     derived_from: str | None = None
     axes: str | None = None
     channel_labels: list[str] | None = None
-    src_channel_indices: list[int] | None = None
-    src_channel_count: int | None = None
+    source_channel_indices: list[int] | None = None
+    artifact_channel_indices: list[int] | None = None
     z_projection: Zproj = None
-    compression: str | None = None
 
     def __post_init__(self) -> None:
         if self.axes is not None:
@@ -33,6 +32,7 @@ class ArtifactMeta:
             return len(self.channel_labels)
         return None
     
+    
     def to_dict(self) -> dict[str, Any]:
         return {
             "artifact_type": self.artifact_type,
@@ -41,15 +41,14 @@ class ArtifactMeta:
             "derived_from": self.derived_from,
             "axes": self.axes,
             "channel_labels": self.channel_labels,
-            "src_channel_indices": self.src_channel_indices,
-            "src_channel_count": self.src_channel_count,
+            "source_channel_indices": self.source_channel_indices,
+            "artifact_channel_indices": self.artifact_channel_indices,
             "z_projection": self.z_projection,
-            "compression": self.compression,
         }
 
 
 @dataclass(slots=True, frozen=True)
-class FitsIOPayload:
+class FitsIOMeta:
     """
     Container for fits_io-specific metadata and any additional custom metadata. Represent the ground truth metadata for the image.
     """
@@ -101,10 +100,9 @@ class FitsIOPayload:
                      derived_from: str | None = None,
                      axes: str | None = None, 
                      channel_labels: Sequence[str] | None = None, 
-                     src_channel_indices: Sequence[int] | None = None, 
-                     src_channel_count: int | None = None, 
+                     source_channel_indices: Sequence[int] | None = None, 
+                     artifact_channel_indices: Sequence[int] | None = None, 
                      z_projection: Zproj = None, 
-                     compression: str | None = None
                      ) -> Self:
         """
         Return a new FitsIOPayload instance with updated fits_io metadata. If a parameter is None, the existing value is retained.
@@ -117,10 +115,9 @@ class FitsIOPayload:
                             derived_from=derived_from if derived_from is not None else self.fits_io.derived_from,
                             axes=axes if axes is not None else self.fits_io.axes,
                             channel_labels=list(channel_labels) if channel_labels is not None else self.fits_io.channel_labels,
-                            src_channel_indices=list(src_channel_indices) if src_channel_indices is not None else self.fits_io.src_channel_indices,
-                            src_channel_count=src_channel_count if src_channel_count is not None else self.fits_io.src_channel_count,
-                            z_projection=z_projection if z_projection is not None else self.fits_io.z_projection,
-                            compression=compression if compression is not None else self.fits_io.compression,),
+                            source_channel_indices=list(source_channel_indices) if source_channel_indices is not None else self.fits_io.source_channel_indices,
+                            artifact_channel_indices=list(artifact_channel_indices) if artifact_channel_indices is not None else self.fits_io.artifact_channel_indices,
+                            z_projection=z_projection if z_projection is not None else self.fits_io.z_projection,)
     )
     
     def with_custom_metadata(self, custom_metadata: Mapping[str, Any] | None) -> Self:

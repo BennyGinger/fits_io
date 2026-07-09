@@ -1,12 +1,12 @@
 import json
 
 from fits_io.metadata.tiff_meta import assemble_tiff_metadata
-from fits_io.metadata.models import FitsIOPayload
+from fits_io.metadata.models import FitsIOMeta
 from fits_io.metadata.codec import FITS_TAG
 
 
-def _make_payload() -> FitsIOPayload:
-    return FitsIOPayload().with_fitsio(
+def _make_payload() -> FitsIOMeta:
+    return FitsIOMeta().with_fitsio(
         version="x",
         axes="TZCYX",
         channel_labels=["GFP", "mCherry"],
@@ -27,7 +27,7 @@ def test_build_tiff_metadata_basic_fields():
 
 
 def test_build_tiff_metadata_encodes_payload_in_extratags():
-    payload = FitsIOPayload().with_fitsio(
+    payload = FitsIOMeta().with_fitsio(
         version="x",
         axes="TZCYX",
         channel_labels=["GFP", "mCherry"],

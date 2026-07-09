@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 import logging
 
-from fits_io.metadata.models import FitsIOPayload
+from fits_io.metadata.models import FitsIOMeta
 import nd2
 from nd2.structures import Channel, ExpLoop, Volume
 import numpy as np
@@ -116,9 +116,9 @@ class Nd2Reader(ImageReader):
         return None
     
     @property
-    def metadata(self) -> FitsIOPayload:
+    def metadata(self) -> FitsIOMeta:
         # .nd2 file do not have custom metadata saved
-        return FitsIOPayload()
+        return FitsIOMeta()
     
     @property
     def zproj_method(self) -> Zproj:

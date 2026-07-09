@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from collections.abc import Sequence
 
-from fits_io.metadata.models import FitsIOPayload
+from fits_io.metadata.models import FitsIOMeta
 import numpy as np
 from numpy.typing import NDArray
 
@@ -89,7 +89,7 @@ class ImageReader(ABC):
     
     @property
     @abstractmethod
-    def metadata(self) -> FitsIOPayload:
+    def metadata(self) -> FitsIOMeta:
         """Return array metadata, including fits_io metadata and custom metadata."""
         ...
     

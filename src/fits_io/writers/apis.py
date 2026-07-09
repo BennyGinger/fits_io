@@ -8,9 +8,10 @@ from numpy.typing import NDArray
 from fits_io.readers._types import Zproj
 from fits_io.readers.protocol import ImageReader
 from fits_io.readers.r_tiff import TiffReader
+from fits_io.metadata.models import FitsIOMeta
 from fits_io.metadata.tiff_meta import assemble_tiff_metadata
-from fits_io.metadata.resolve import resolve_channel_selection, resolve_output_axes, remap_source_indices
-from fits_io.metadata.payload import build_payload
+from fits_io.metadata.resolve import resolve_channel_selection, resolve_output_axes
+from fits_io.metadata.payload import assemble_payload
 from fits_io.writers.filesystem import build_output_paths
 from fits_io.writers.core import save_tiff
 
@@ -65,17 +66,18 @@ def convert_to_fits_tif(img_reader: ImageReader,
         out_axes = resolve_output_axes(reader_axes=reader.axes, 
                                        z_projection=z_projection, 
                                        n_channels=len(selection.export_labels))
-        meta = build_payload(reader.metadata,
+        selection.validate_array(array_shape=array.shape, axes=out_axes)
+        
+        meta = assemble_payload(reader.metadata,
                              artifact_type = artifact_type,
                              created_by = "fits_io",
                              derived_from = "raw_image",
                              axes = out_axes,
                              channel_labels = selection.export_labels,
-                             source_channel_indices = selection.export_indices,
-                             source_channel_count = reader.channel_count,
+                             source_channel_indices = [i for i in range(reader.channel_count)],
+                             artifact_channel_indices = selection.export_indices,
                              z_projection = z_projection,
-                             custom_metadata = custom_metadata,
-                             compression = compression,)
+                             custom_metadata = custom_metadata)
         meta_write = assemble_tiff_metadata(meta, 
                                             reader.interval, 
                                             reader.resolution)
@@ -86,12 +88,9 @@ def convert_to_fits_tif(img_reader: ImageReader,
 
 def save_array(img_reader: ImageReader, 
                array: NDArray[Any], 
-               export_channels: str | Sequence[str],
-               output_name: str = DEFAULT_OUTPUT_NAME, 
                *, 
-               artifact_type: str | None = None,
-               created_by: str | None = None,
-               custom_metadata: Mapping[str, Any] | None = None,
+               fitsio_metadata: FitsIOMeta,
+               output_name: str = DEFAULT_OUTPUT_NAME, 
                compression: str | None = 'zlib', 
                ) -> Path:
     """
@@ -123,31 +122,7 @@ def save_array(img_reader: ImageReader,
     else:
         current_compression = compression
 
-    channel_labels = img_reader.metadata.fits_io.channel_labels
-    
-    selection = resolve_channel_selection(channel_labels, 
-                                          n_channels=img_reader.channel_count,
-                                          export_channels=export_channels)
-    out_axes = resolve_output_axes(reader_axes=img_reader.axes,
-                                   z_projection=None,
-                                   n_channels=len(selection.export_labels))
-    selection.validate_array(array_shape=array.shape, axes=out_axes)
-    
-    # Remap the source channel indices to the original indices if needed
-    remapped_indices = remap_source_indices(existing=img_reader.metadata.fits_io.src_channel_indices, 
-                                            selected=selection.export_indices)
-    
-    meta = build_payload(img_reader.metadata,
-                         axes = out_axes,
-                         channel_labels = selection.export_labels,
-                         source_channel_indices = remapped_indices,
-                         artifact_type = artifact_type,
-                         created_by = created_by,
-                         derived_from = img_reader.metadata.fits_io.artifact_type,
-                         custom_metadata = custom_metadata,
-                         compression = compression,)
-    
-    meta_write = assemble_tiff_metadata(meta, 
+    meta_write = assemble_tiff_metadata(fitsio_metadata, 
                                         img_reader.interval, 
                                         img_reader.resolution)
     
@@ -180,9 +155,8 @@ def set_channel_labels(img_reader: ImageReader,
                                           n_channels=img_reader.channel_count)
     
     # Get existing metadata to preserve other fields
-    meta = build_payload(img_reader.metadata,
-                         channel_labels=selection.export_labels,
-                         compression = compression,)
+    meta = assemble_payload(img_reader.metadata,
+                         channel_labels=selection.export_labels,)
     meta_write = assemble_tiff_metadata(meta, 
                                         img_reader.interval, 
                                         img_reader.resolution)
@@ -215,10 +189,9 @@ def apply_zproj(img_reader: ImageReader,
     out_axes = resolve_output_axes(img_reader.axes, z_projection, img_reader.channel_count)
     
     # Get existing metadata to preserve other fields
-    meta = build_payload(img_reader.metadata,
+    meta = assemble_payload(img_reader.metadata,
                          z_projection=z_projection,
-                         axes=out_axes,
-                         compression = compression,)
+                         axes=out_axes,)
     meta_write = assemble_tiff_metadata(meta, 
                                         img_reader.interval, 
                                         img_reader.resolution)

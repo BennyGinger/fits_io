@@ -4,10 +4,11 @@ from pathlib import Path
 from typing import Any, TypeVar
 from collections.abc import  Mapping, Sequence
 
-from fits_io.metadata.models import FitsIOPayload
 from numpy.typing import NDArray
 import numpy as np
 
+from fits_io.metadata.models import FitsIOMeta
+from fits_io.metadata.payload import build_payload
 from fits_io.readers.protocol import ImageReader
 from fits_io.readers._types import Zproj
 from fits_io.readers.factory import get_reader
@@ -23,7 +24,7 @@ class FitsIO:
     """
     def __init__(self, reader: ImageReader):
         self.reader = reader
-    
+        
     
     @classmethod
     def from_path(cls, path: str | Path) -> FitsIO:
@@ -40,17 +41,9 @@ class FitsIO:
     
     
     @property
-    def shape(self) -> tuple[int, ...]:
+    def metadata(self) -> FitsIOMeta:
         """
-        Returns the shape of the image data.
-        """
-        return self.reader.shape
-    
-    
-    @property
-    def metadata(self) -> FitsIOPayload:
-        """
-        Returns the FITS metadata as a dictionary.
+        Returns the FITS metadata.
         """
         return self.reader.metadata
     
@@ -62,12 +55,19 @@ class FitsIO:
         
         Note: If none are found, it returns the default labels C_1, C_2, ..., C_n.
         """
-        meta = self.reader.metadata
-        labels = meta.fits_io.channel_labels
+        labels = self.metadata.fits_io.channel_labels
         if labels is None:
             n_channels = self.reader.channel_count
             labels = [f"C_{i+1}" for i in range(n_channels)]
         return labels
+    
+    
+    @property
+    def artefact_channel_indices(self) -> list[int] | None:
+        """
+        Returns the artifact channel indices from the metadata, if available.
+        """
+        return self.metadata.fits_io.artifact_channel_indices
     
     
     def set_channel_labels(self, channel_labels: str | Sequence[str], compression: str | None = 'zlib') -> None:
@@ -159,13 +159,14 @@ class FitsIO:
 
     def save_array(self, 
                    array: NDArray, 
-                   export_channels: str | Sequence[str],
-                   output_name: str = DEFAULT_OUTPUT_NAME, 
                    *, 
+                   output_name: str = DEFAULT_OUTPUT_NAME, 
+                   export_channels: str | Sequence[str],
                    artifact_type: str | None = None,
                    created_by: str | None = None,
+                   z_projection: Zproj = None,
                    custom_metadata: Mapping[str, Any] | None = None,
-                   compression: str | None = 'zlib'
+                   compression: str | None = 'zlib',
                    ) -> Path:
         """
         Save the given array to a FITS TIFF file with ImageJ metadata.
@@ -178,22 +179,28 @@ class FitsIO:
         Args:
             array : The NumPy array to save.
             output_name : Optional name of the output TIFF file.
+            export_channels : Subset channels to export. Can be 'all' or a list of channel labels.
             artifact_type : Type of artifact to set in the metadata, by default None.
             created_by : Optional string to set as the creator in the metadata (e.g. distributor), by default None.
-            export_channels : Subset channels to export. Can be 'all' or a list of channel labels, by default 'all'.
+            z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
             custom_metadata : Additional custom metadata to include in the TIFF file, by default None.
             compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'.
-        
+            
         Returns:
-            Path: The path of the saved TIFF file.
+            Path of the saved TIFF file.
         """
+        
+        meta = self._build_payload(export_channels=export_channels,
+                                   artifact_type=artifact_type,
+                                   created_by=created_by,
+                                   z_projection=z_projection,
+                                   custom_metadata=custom_metadata,
+                                   array_shape=array.shape)
+        
         return save_array(self.reader, 
                           array,
+                          fitsio_metadata=meta,
                           output_name=output_name,
-                          artifact_type=artifact_type,
-                          created_by=created_by,
-                          export_channels=export_channels,
-                          custom_metadata=custom_metadata,
                           compression=compression)
     
     
@@ -202,6 +209,9 @@ class FitsIO:
 
 
     def _resolve_channel_indices(self, channels: int | str | Sequence[int | str]) -> list[int]:
+        """
+        Resolve channel indices from the provided channel selector(s) to always return a list of integer indices. 
+        """
         labels = self.channel_labels
 
         if isinstance(channels, (int, str)):
@@ -220,6 +230,40 @@ class FitsIO:
             else:
                 raise TypeError(f"Expected int or str channel, got {type(ch).__name__}")
         return indices
+    
+    
+    def _build_payload(self,
+                      *,
+                      export_channels: str | Sequence[str],
+                      artifact_type: str | None = None,
+                      created_by: str | None = None,
+                      z_projection: Zproj = None,
+                      custom_metadata: Mapping[str, Any] | None = None,
+                      array_shape: tuple[int, ...] | None = None,
+                      ) -> FitsIOMeta:
+        """
+        Build a FITS I/O metadata payload based on the current reader and provided parameters.
+        
+        Args:
+            export_channels : Subset channels to export. Can be 'all' or a list of channel labels.
+            artifact_type : Type of artifact to set in the metadata, by default None.
+            created_by : Optional string to set as the creator in the metadata (e.g. distributor), by default None.
+            z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
+            custom_metadata : Additional custom metadata to include in the TIFF file, by default None.
+            array_shape : Optional shape of the array to validate against the channel selection. If None, no validation is performed.
+        
+        Returns:
+            FitsIOMeta: The constructed FITS I/O metadata payload.
+        """
+        
+        return build_payload(self.reader,
+                             channel_labels=self.channel_labels,
+                             export_channels=export_channels,
+                             artifact_type=artifact_type,
+                             created_by=created_by,
+                             z_projection=z_projection,
+                             custom_metadata=custom_metadata,
+                             array_shape=array_shape)
 
 
 if __name__ == "__main__":
@@ -230,5 +274,10 @@ if __name__ == "__main__":
     
     read2 = FitsIO.from_path(file_path[0])
     read2.set_channel_labels(["RFP", "yellow"])
-    red = read2.get_channel("RFP")
-    read2.save_array(red, output_name="red_channel.tif", export_channels="RFP", custom_metadata={"note": "red channel only"})
+    red = read2.get_channel("yellow")
+    
+    path2 = read2.save_array(red, output_name="red_channel.tif", export_channels="yellow", custom_metadata={"note": "red channel only"})
+    
+    input("Press Enter to continue...")
+    read3 = FitsIO.from_path(path2)
+    read3.apply_z_projection("max", compression=None)

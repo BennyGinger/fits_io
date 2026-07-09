@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping, Sequence, Callable
 
-from fits_io.metadata.models import FitsIOPayload
+from fits_io.metadata.models import FitsIOMeta
 from fits_io.readers._types import Zproj
 import numpy as np
 import pytest
@@ -147,8 +147,8 @@ class DummyReader(ImageReader):
         return self.get_array().shape
 
     @property
-    def metadata(self) -> FitsIOPayload:
-        return FitsIOPayload().with_fitsio(channel_labels=list(self._labels or []), n_channels=self.channel_count)
+    def metadata(self) -> FitsIOMeta:
+        return FitsIOMeta().with_fitsio(channel_labels=list(self._labels or []), n_channels=self.channel_count)
 
     def get_array(self, z_projection: Zproj = None) -> NDArray:
         self.called_get_array += 1

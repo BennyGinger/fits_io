@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from fits_io.metadata.models import FitsIOPayload
+from fits_io.metadata.models import FitsIOMeta
 from fits_io.writers import apis
 
 
@@ -51,7 +51,7 @@ def test_convert_to_fits_tif_sets_source_channel_identity_for_subset(monkeypatch
 
     built: list[dict[str, object]] = []
 
-    def fake_build_payload(base: FitsIOPayload, **kwargs):
+    def fake_build_payload(base: FitsIOMeta, **kwargs):
         built.append(kwargs)
         return base.with_fitsio(**{k: v for k, v in kwargs.items() if k in {
             "axes", "channel_labels", "n_channels", "source_channel_indices", "source_channel_count", "z_projection", "compression"
@@ -75,7 +75,7 @@ def test_convert_to_fits_tif_passes_custom_metadata(monkeypatch, dummy_reader) -
 
     seen: list[dict[str, object]] = []
 
-    def fake_build_payload(base: FitsIOPayload, **kwargs):
+    def fake_build_payload(base: FitsIOMeta, **kwargs):
         seen.append(kwargs)
         return base.with_custom_metadata(kwargs.get("custom_metadata"))
 

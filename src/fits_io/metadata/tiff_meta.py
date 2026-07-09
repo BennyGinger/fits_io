@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from fits_io.readers._types import ExtraTags, PixelDensity, PixelSize
-from fits_io.metadata.models import FitsIOPayload
+from fits_io.metadata.models import FitsIOMeta
 from fits_io.metadata.imageJ_meta import InfoSummary, LABEL_TO_COLOR, COLOR_MAP, make_color_lut
 from fits_io.metadata.codec import encode_metadata
 
@@ -97,7 +97,7 @@ class TiffWriteMeta:
 
 
 
-def assemble_tiff_metadata(payload: FitsIOPayload, interval: float | None, resolution: PixelSize | None,) -> TiffWriteMeta:
+def assemble_tiff_metadata(payload: FitsIOMeta, interval: float | None, resolution: PixelSize | None,) -> TiffWriteMeta:
     """
     Assemble ImageJ-compatible TIFF metadata from a FitsIOPayload, interval, and resolution.
     """
