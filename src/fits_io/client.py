@@ -9,10 +9,16 @@ import numpy as np
 
 from fits_io.metadata.models import FitsIOMeta
 from fits_io.metadata.payload import build_payload
+from fits_io.metadata.resolve import resolve_channel_selection, resolve_output_axes
 from fits_io.readers.protocol import ImageReader
 from fits_io.readers._types import Zproj
 from fits_io.readers.factory import get_reader
-from fits_io.writers.apis import apply_zproj, convert_to_fits_tif, save_array, set_channel_labels, DEFAULT_OUTPUT_NAME
+from fits_io.writers.apis import apply_zproj, merge_channel_arrays, prepare_conversion, save_array, set_channel_labels 
+from fits_io.writers.models import ChannelMergeResult, ConversionPreparation, ArrayResult, ChannelSubset, ChannelSelection
+from fits_io.writers.filesystem import create_save_path
+
+
+DEFAULT_OUTPUT_NAME = 'fits.tif'
 
 
 T = TypeVar('T', bound=np.generic)
@@ -63,12 +69,20 @@ class FitsIO:
     
     
     @property
-    def artefact_channel_indices(self) -> list[int] | None:
+    def artifact_channel_indices(self) -> list[int]:
         """
-        Returns the artifact channel indices from the metadata, if available.
+        Returns the current source indices of the artifacts.
         """
         return self.metadata.fits_io.artifact_channel_indices
     
+    
+    @property
+    def source_channel_indices(self) -> list[int]:
+        """
+        Returns the original source channel indices from the metadata, if available.
+        """
+        return self.metadata.fits_io.source_channel_indices
+  
     
     def set_channel_labels(self, channel_labels: str | Sequence[str], compression: str | None = 'zlib') -> None:
         """
@@ -86,24 +100,36 @@ class FitsIO:
         self.reader = get_reader(path)  # Reload the reader to reflect updated metadata.
     
     
-    def get_array(self, z_projection: Zproj = None) -> NDArray[Any]:
+    def get_array(self, z_projection: Zproj = None) -> ArrayResult:
         """
-        Returns the image data NumPy array.
+        Returns the image data NumPy array and the axes string from the current reader, optionally applying a z-projection.
+        
         Args:
             z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
+        
+        Returns:
+            ArrayResult : A dataclass containing the NumPy array and the axes string.
         """
-        return self.reader.get_array(z_projection=z_projection)
+        array = self.reader.get_array(z_projection=z_projection)
+        return ArrayResult(array=array, axes=self.reader.axes)
     
     
-    def get_channel(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> NDArray[Any]:
+    def get_channel(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> ArrayResult:
         """
-        Returns the image data for a specific channel(s) as a NumPy array.
+        Returns the image data NumPy array for the specified channel(s) and the axes string from the current reader, optionally applying a z-projection.
+        
         Args:
             channel : Channel selector(s): int indices and/or str labels (all must be same type).
             z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
+        
+        Returns:
+            ArrayResult : A dataclass containing the NumPy array and the axes string.
         """
-        chan_idx = self._resolve_channel_indices(channel)
-        return self.reader.get_channel(chan_idx, z_projection=z_projection)
+        chan_positions = self._resolve_channel_positions(channel)
+        out_axes = self._resolve_output_axes(z_projection=z_projection, n_channels=len(chan_positions),)
+        array = self.reader.get_channel(chan_positions, z_projection=z_projection)
+        
+        return ArrayResult(array=array, axes=out_axes)
     
     
     def apply_z_projection(self, z_projection: Zproj | None, compression: str | None = 'zlib') -> None:
@@ -123,117 +149,184 @@ class FitsIO:
         self.reader = get_reader(path)  # Reload the reader to reflect updated metadata.
     
     
-    def convert_to_fits(self, 
-                        *, 
-                        output_name: str = DEFAULT_OUTPUT_NAME, 
-                        channel_labels: str | Sequence[str] | None = None,
-                        export_channels: str | Sequence[str] = 'all',
-                        artifact_type: str = "image",
-                        custom_metadata: Mapping[str, Any] | None = None, 
-                        z_projection: Zproj = None, 
-                        compression: str | None = 'zlib'
-                        ) -> list[Path]:
+    def split_series(self) -> list[FitsIO]:
         """
-        Convert an image file to a FITS TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
+        Split the current image into multiple series readers and return a list of FitsIO instances for each series.
+        
+        Returns:
+            List of FitsIO instances, one for each series in the original image.
+        """
+        series_readers = self.reader.split_series()
+        return [FitsIO(reader) for reader in series_readers]
+    
+    
+    def labels_to_indices(self, requested_labels: str | Sequence[str],) -> list[int]:
+        """
+        Resolve channel labels to the source channel indices represented by the current artifact.
+        """
+        artifact_labels = self.channel_labels
+        artifact_indices = self.artifact_channel_indices
+
+        if artifact_indices is None:
+            raise ValueError("Input artifact metadata is missing artifact_channel_indices.")
+
+        if len(artifact_labels) != len(artifact_indices):
+            raise ValueError("Input artifact metadata mismatch: "
+                             f"channel_labels has {len(artifact_labels)} entries but "
+                             f"artifact_channel_indices has {len(artifact_indices)}.")
+
+        label_to_source = dict(zip(artifact_labels, artifact_indices, strict=True))
+
+        try:
+            if isinstance(requested_labels, str):
+                requested_labels = [requested_labels]
+            return [label_to_source[label] for label in requested_labels]
+        except KeyError as exc:
+            missing_label = exc.args[0]
+            raise ValueError(f"Requested channel label {missing_label!r} was not found. "
+                             f"Available labels: {artifact_labels}.") from exc
+    
+    
+    def indices_to_labels(self, source_indices: int | Sequence[int],) -> list[str]:
+        """
+        Resolve source channel indices represented by the current artifact back to their channel labels.
+        """
+        artifact_labels = self.channel_labels
+        artifact_source_indices = self.artifact_channel_indices
+
+        if artifact_source_indices is None:
+            raise ValueError("Input artifact metadata is missing artifact_channel_indices.")
+
+        if len(artifact_labels) != len(artifact_source_indices):
+            raise ValueError("Input artifact metadata mismatch: "
+                f"channel_labels has {len(artifact_labels)} entries but "
+                f"artifact_channel_indices has {len(artifact_source_indices)}.")
+
+        source_to_label = dict(zip(artifact_source_indices, artifact_labels, strict=True))
+
+        try:
+            if isinstance(source_indices, int):
+                source_indices = [source_indices]
+            return [source_to_label[index] for index in source_indices]
+        except KeyError as exc:
+            missing_index = exc.args[0]
+            raise ValueError(f"Source channel index {missing_index} was not found. "
+                             f"Available source indices: {artifact_source_indices}.") from exc
+    
+    
+    def resolve_channel_selection(self, 
+                                  *,
+                                  channel_labels: str | Sequence[str] | None = None, 
+                                  export_channels: str | Sequence[str] = 'all'
+                                  ) -> ChannelSelection:
+        """
+        Resolve channel indices and labels from the provided channel selector(s) and export channels. To ensure that updated metadata is saved in the output file, this function should be called before ``convert_to_fits`` or ``save_array``.
+        
         Args:
-            output_name : Optional name of the output TIFF file.
             channel_labels : Optional labels for source channels (used for mapping), if None, default labels will be used. 
             export_channels : Subset channels to export. Can be 'all' or a list of channel labels, by default 'all'.
-            artifact_type : Type of artifact to set in the metadata, by default "image".
-            custom_metadata : Additional custom metadata to include in the TIFF file, by default None.
-            z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
-            compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'.
+        
         Returns:
-            List of Paths of the saved TIFF files.
+            ChannelSelection : A dataclass containing the resolved channel indices and labels for export.
         """
-        save_paths = convert_to_fits_tif(self.reader,
-                            output_name=output_name,
-                            channel_labels=channel_labels, 
-                            export_channels=export_channels,
-                            artifact_type=artifact_type,
-                            custom_metadata=custom_metadata,
-                            z_projection=z_projection, 
-                            compression=compression)
-        return save_paths
+        return resolve_channel_selection(channel_labels=channel_labels,
+                                         n_channels=self.reader.channel_count,
+                                         export_channels=export_channels)
+    
+      
+    def prepare_conversion(self,
+                           selection: ChannelSelection,
+                           *,
+                           output_name: str = DEFAULT_OUTPUT_NAME,
+                           artifact_kind: str | None = None,
+                           created_by: str | None = None,
+                           custom_metadata: Mapping[str, Any] | None = None,
+                           z_projection: Zproj = None,
+                           ) -> ConversionPreparation:
+        """
+        Prepare an array for initial conversion and return the selected array along with the output path.
+        
+        Returns:
+            ConversionPreparation : A dataclass containing the selected array and the output path for saving.
+        """
+        return prepare_conversion(self.reader,
+                                  selection=selection,
+                                  output_name=output_name,
+                                  artifact_kind=artifact_kind,
+                                  created_by=created_by,
+                                  custom_metadata=custom_metadata,
+                                  z_projection=z_projection,)
 
 
     def save_array(self, 
                    array: NDArray, 
-                   *, 
-                   output_name: str = DEFAULT_OUTPUT_NAME, 
-                   export_channels: str | Sequence[str],
-                   artifact_type: str | None = None,
+                   *,
+                   channel_labels: str | Sequence[str] | None = None,
+                   export_channels: str | Sequence[str] = 'all',
+                   artifact_kind: str | None = None,
                    created_by: str | None = None,
                    z_projection: Zproj = None,
-                   custom_metadata: Mapping[str, Any] | None = None,
+                   custom_metadata: Mapping[str, Any] | None = None, 
+                   metadata: FitsIOMeta | None = None,
+                   output_name: str = DEFAULT_OUTPUT_NAME, 
+                   output_path: Path | None = None,
                    compression: str | None = 'zlib',
                    ) -> Path:
         """
-        Save the given array to a FITS TIFF file with ImageJ metadata.
-        
+        Save an array to a FITS TIFF.
+
         Policy:
-        - This function will only save the provided array to a new file with the specified output name.
-        - The metadata will be retrieved from the image reader, except for any custom metadata provided, which will be added or merged to existing metadata.
-        - Multi-series inputs are not supported here by design.
+            - By default, output metadata is built from the current reader and the
+            provided artifact parameters. A fully constructed metadata object may
+            instead be supplied through ``metadata``. If so, then ``export_channels``, ``artifact_type``, ``created_by``, ``z_projection``, and ``custom_metadata`` are ignored.
+            - By default, the output path is constructed from the current reader's path and ``output_name``. A fully constructed path may instead be supplied through ``output_path``. If so, then ``output_name`` is ignored.
         
         Args:
-            array : The NumPy array to save.
-            output_name : Optional name of the output TIFF file.
-            export_channels : Subset channels to export. Can be 'all' or a list of channel labels.
-            artifact_type : Type of artifact to set in the metadata, by default None.
-            created_by : Optional string to set as the creator in the metadata (e.g. distributor), by default None.
-            z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
-            custom_metadata : Additional custom metadata to include in the TIFF file, by default None.
-            compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'.
-            
+            array : 
+                The NumPy array to save.
+            export_channels : 
+                Subset channels to export. Can be 'all' or a list of channel labels.
+            artifact_type : 
+                Type of artifact to set in the metadata. If None, it will use the current type. By default None.
+            created_by : 
+                Optional string to set as the creator in the metadata (e.g. distributor). If None, it will use the current creator. By default None.
+            z_projection : 
+                Z-projection method to apply ('max', 'mean', or None). If None, it will use the current z-projection. By default None.
+            custom_metadata : 
+                Additional custom metadata to include in the TIFF file. If None, it will use the current custom metadata. By default None.
+            metadata : 
+                Optional pre-built FitsIOMeta object to use for saving. If provided, it will override the other metadata parameters.
+            output_name : 
+                Name of the output TIFF file. Ignored if ``output_path`` is provided. By default 'fits.tif'.
+            output_path : 
+                Optional full path for the output TIFF file. If provided, it will override ``output_name``.
+            compression : 
+                Compression method to use for the TIFF file. If None, no compression is applied. By default 'zlib'.
+        
         Returns:
-            Path of the saved TIFF file.
+            Path : The path of the saved TIFF file.
         """
+        if output_path is None:
+            output_path = create_save_path(self.reader.img_path, output_name,)
+
+        meta = metadata or self.build_payload(channel_labels=channel_labels,
+                                              export_channels=export_channels,
+                                              artifact_type=artifact_kind,
+                                              created_by=created_by,
+                                              z_projection=z_projection,
+                                              custom_metadata=custom_metadata,
+                                              array_shape=array.shape,)
         
-        meta = self._build_payload(export_channels=export_channels,
-                                   artifact_type=artifact_type,
-                                   created_by=created_by,
-                                   z_projection=z_projection,
-                                   custom_metadata=custom_metadata,
-                                   array_shape=array.shape)
-        
-        return save_array(self.reader, 
+        return save_array(self.reader,
                           array,
                           fitsio_metadata=meta,
-                          output_name=output_name,
-                          compression=compression)
+                          output_path=output_path,
+                          compression=compression,)
     
     
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self.reader, name)
-
-
-    def _resolve_channel_indices(self, channels: int | str | Sequence[int | str]) -> list[int]:
-        """
-        Resolve channel indices from the provided channel selector(s) to always return a list of integer indices. 
-        """
-        labels = self.channel_labels
-
-        if isinstance(channels, (int, str)):
-            channels = [channels]
-
-        mapping = {lbl: idx for idx, lbl in enumerate(labels)}
-        indices: list[int] = []
-        for ch in channels:
-            if isinstance(ch, int):
-                indices.append(ch)
-            elif isinstance(ch, str):
-                try:
-                    indices.append(mapping[ch])
-                except KeyError:
-                    raise KeyError(f"Unknown channel label {ch!r}. Available labels: {labels}")
-            else:
-                raise TypeError(f"Expected int or str channel, got {type(ch).__name__}")
-        return indices
-    
-    
-    def _build_payload(self,
+    def build_payload(self,
                       *,
+                      channel_labels: str | Sequence[str] | None = None,
                       export_channels: str | Sequence[str],
                       artifact_type: str | None = None,
                       created_by: str | None = None,
@@ -245,39 +338,207 @@ class FitsIO:
         Build a FITS I/O metadata payload based on the current reader and provided parameters.
         
         Args:
-            export_channels : Subset channels to export. Can be 'all' or a list of channel labels.
-            artifact_type : Type of artifact to set in the metadata, by default None.
-            created_by : Optional string to set as the creator in the metadata (e.g. distributor), by default None.
-            z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
-            custom_metadata : Additional custom metadata to include in the TIFF file, by default None.
-            array_shape : Optional shape of the array to validate against the channel selection. If None, no validation is performed.
+            export_channels : 
+                Subset channels to export. Can be 'all' or a list of channel labels.
+            artifact_type : 
+                Type of artifact to set in the metadata, by default None.
+            created_by : 
+                Optional string to set as the creator in the metadata (e.g. distributor), by default None.
+            z_projection : 
+                Z-projection method to apply ('max', 'mean', or None), by default None.
+            custom_metadata :   
+                Additional custom metadata to include in the TIFF file, by default None.
+            array_shape : 
+                Optional shape of the array to validate against the channel selection. If None, no validation is performed.
         
         Returns:
             FitsIOMeta: The constructed FITS I/O metadata payload.
         """
+        if channel_labels is None:
+            channel_labels = self.channel_labels
+        selection = self.resolve_channel_selection(channel_labels=channel_labels,
+                                                   export_channels=export_channels)
         
         return build_payload(self.reader,
-                             channel_labels=self.channel_labels,
-                             export_channels=export_channels,
-                             artifact_type=artifact_type,
+                             selection=selection,
+                             artifact_kind=artifact_type,
                              created_by=created_by,
                              z_projection=z_projection,
                              custom_metadata=custom_metadata,
-                             array_shape=array_shape)
+                             array_shape=array_shape,)
 
 
-if __name__ == "__main__":
-    path = Path("/media/ben/Analysis/Python/Images/nd2/Run2/c2z25t23v1_nd2.nd2")
+    def select_included_channels(self, excluded_labels: Sequence[str] | None,) -> ChannelSubset[Any]:
+        """
+        Load the channels that should be processed.
+
+        Channel positions refer to positions along the current artifact's C axis,
+        not source channel indices.
+
+        No exclusions, no C axis, or exclusion of all available channels means
+        that the complete array is selected.
+        
+        Returns:
+            ChannelSubset : A dataclass containing the selected array and the channel positions for processing and the rebuild method to reconstruct the full array.
+        """
+        if not excluded_labels or "C" not in self.axes:
+            return ChannelSubset(reader=self,
+                                 array=self.get_array().array,
+                                 channel_positions=(),)
+
+        excluded_positions = set(self._resolve_channel_positions(excluded_labels))
+
+        included_positions = tuple(position
+                                   for position in range(self.reader.channel_count)
+                                   if position not in excluded_positions)
+
+        # Existing policy: excluding all channels means process the full array.
+        if not included_positions:
+            return ChannelSubset(reader=self,
+                                 array=self.get_array().array,
+                                 channel_positions=(),)
+
+        return ChannelSubset(reader=self,
+                             array=self.get_channel(included_positions).array,
+                             channel_positions=included_positions,)
+
+
+    def replace_channels(self,
+                         channel: int | str | Sequence[int | str],
+                         replacement: NDArray[Any],
+                         ) -> NDArray[Any]:
+        """
+        Return the complete array with selected channels replaced.
+        """
+        chan_positions = self._resolve_channel_positions(channel)
+        result = self.get_array()
+        output = result.array
+        
+        channel_axis = self.axes.index("C")
+        # Add a channel axis to the replacement if it is a single channel (missing C axis)
+        if len(chan_positions) == 1 and replacement.ndim == output.ndim - 1:
+            replacement = np.expand_dims(replacement,
+                                         axis=channel_axis,)
+        
+        expected_shape = list(output.shape)
+        expected_shape[channel_axis] = len(chan_positions)
+        expected_shape = tuple(expected_shape)
+
+        if replacement.shape != expected_shape:
+            raise ValueError("Replacement shape does not match the selected channels: " + 
+                             f"expected {expected_shape}, got {replacement.shape}.")
+
+        output_view = np.moveaxis(output, channel_axis, 0)
+        replacement_view = np.moveaxis(replacement, channel_axis, 0)
+        output_view[chan_positions] = replacement_view
+
+        return output
     
-    reader = FitsIO.from_path(path)
-    file_path = reader.convert_to_fits(output_name="test_output.tif")
     
-    read2 = FitsIO.from_path(file_path[0])
-    read2.set_channel_labels(["RFP", "yellow"])
-    red = read2.get_channel("yellow")
+    def merge_channels(self,
+                       *,
+                       existing: FitsIO | None,
+                       new_array: NDArray[Any],
+                       new_axes: str,
+                       new_channel_indices: Sequence[int],
+                       ) -> ChannelMergeResult:
+        new_indices = list(new_channel_indices)
+        
+        if existing is None:
+            return ChannelMergeResult(array=new_array, axes=new_axes, channel_indices=new_indices)
+        
+        existing_indices = existing.artifact_channel_indices
+        
+        if existing_indices is None:
+            raise ValueError(f"Existing artifact at {self.reader.img_path} "
+                             "does not have artifact channel indices.")
     
-    path2 = read2.save_array(red, output_name="red_channel.tif", export_channels="yellow", custom_metadata={"note": "red channel only"})
+        existing_results = existing.get_array()
+        
+        return merge_channel_arrays(existing_array=existing_results.array,
+                                    existing_axes=existing_results.axes,
+                                    existing_channel_indices=existing_indices,
+                                    new_array=new_array,
+                                    new_axes=new_axes,
+                                    new_channel_indices=new_channel_indices,
+                                    reference_axes=self.axes,)
+
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.reader, name)
+
+
+    def _resolve_channel_positions(self, channels: int | str | Sequence[int | str]) -> list[int]:
+        """
+        Resolve channel position from the provided channel selector(s) to always return a list of integer indices. 
+        """
+        if "C" not in self.axes:
+            raise ValueError("Cannot select channels: the input has no C axis.")
+        
+        if isinstance(channels, (int, str)):
+            channels = [channels]
+        
+        channels = list(channels)
+        if not channels:
+            raise ValueError("At least one channel must be selected.")
+        
+        labels = self.channel_labels
+        mapping = {lbl: pos for pos, lbl in enumerate(labels)}
+
+        positions: list[int] = []
+        for ch in channels:
+            if isinstance(ch, int):
+                if ch < 0 or ch >= len(labels):
+                    raise ValueError(f"Channel index {ch} is out of range. "
+                                     f"Available indices: 0 to {len(labels) - 1}.")
+                positions.append(ch)
+            
+            elif isinstance(ch, str):
+                try:
+                    positions.append(mapping[ch])
+                except KeyError as exc:
+                    raise KeyError(f"Unknown channel label {ch!r}. Available labels: {labels}") from exc
+            else:
+                raise TypeError(f"Expected int or str channel, got {type(ch).__name__}")
+        
+        if len(positions) != len(set(positions)):
+            raise ValueError(f"Duplicate channel selection: {channels!r}.")
+        return positions
+
+
+    def _resolve_output_axes(self, z_projection: Zproj = None, n_channels: int | None = None) -> str:
+        """
+        Resolve output axes string for ImageJ metadata based on the current reader's axes and provided parameters.
+        
+        Args:
+            z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
+            n_channels : Optional number of channels to consider for output axes. If None, uses the current reader's channel count.
+        
+        Returns:
+            str : The resolved output axes string.
+        """
+        if n_channels is None:
+            n_channels = self.reader.channel_count
+        return resolve_output_axes(reader_axes=self.reader.axes,
+                                   z_projection=z_projection,
+                                   n_channels=n_channels)
     
-    input("Press Enter to continue...")
-    read3 = FitsIO.from_path(path2)
-    read3.apply_z_projection("max", compression=None)
+    
+
+# if __name__ == "__main__":
+#     path = Path("/media/ben/Analysis/Python/Images/nd2/Run2/c2z25t23v1_nd2.nd2")
+    
+#     reader = FitsIO.from_path(path)
+#     readers = reader.split_series()
+#     selection = reader.resolve_channel_selection()
+#     file_path = readers[0].convert_to_fits(output_name="test_output.tif", export_indices=selection.export_indices, export_labels=selection.export_labels)
+    
+#     read2 = FitsIO.from_path(file_path)
+#     read2.set_channel_labels(["RFP", "yellow"])
+#     red = read2.get_channel("yellow")
+    
+#     path2 = read2.save_array(red, output_name="red_channel.tif", export_channels="yellow", custom_metadata={"note": "red channel only"})
+    
+#     input("Press Enter to continue...")
+#     read3 = FitsIO.from_path(path2)
+#     read3.apply_z_projection("max", compression=None)

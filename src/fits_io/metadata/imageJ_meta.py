@@ -54,60 +54,168 @@ LABEL_TO_COLOR = {
 class InfoSummary:
     payload: Mapping[str, Any] | None
 
+    _DELIMITER_CHARS = ("* ", "=", "+", "~", ". ")
+    _DELIMITER_WIDTH = 50
+
     @staticmethod
     def _toml_value(value: Any) -> str:
         if isinstance(value, str):
             return json.dumps(value, ensure_ascii=False)
+
         if isinstance(value, bool):
             return "true" if value else "false"
+
         if value is None:
             return "null"
+
         if isinstance(value, (int, float)):
             return str(value)
+
         if isinstance(value, tuple):
             return json.dumps(list(value), ensure_ascii=False)
+
         if isinstance(value, list):
             return json.dumps(value, ensure_ascii=False)
+
         return json.dumps(str(value), ensure_ascii=False)
 
     @classmethod
-    def _append_toml_sections(cls, lines: list[str], section: str, value: Mapping[str, Any]) -> None:
-        lines.append(f"[{section}]")
+    def _delimiter(cls, depth: int) -> str:
+        """
+        Return the delimiter associated with a zero-based nesting depth.
+
+        Depths beyond the configured styles reuse the final delimiter style.
+        """
+        style_index = min(depth, len(cls._DELIMITER_CHARS) - 1)
+        delimiter_char = cls._DELIMITER_CHARS[style_index]
+
+        return delimiter_char * cls._DELIMITER_WIDTH
+
+    @classmethod
+    def _append_heading(cls,
+                        lines: list[str],
+                        *,
+                        section: str,
+                        depth: int,
+                        ) -> None:
+        delimiter = cls._delimiter(depth)
+
+        lines.extend([delimiter,
+                      section,
+                      delimiter,
+                      "",])
+
+    @staticmethod
+    def _partition_items(value: Mapping[str, Any],) -> tuple[list[tuple[str, Any]],
+                                                             list[tuple[str, Mapping[str, Any]]],]:
+        """
+        Split a mapping into scalar values and nested mappings.
+        """
+        scalar_items: list[tuple[str, Any]] = []
+        nested_items: list[tuple[str, Mapping[str, Any]]] = []
 
         for key, child in value.items():
+            key = str(key)
+
             if isinstance(child, Mapping):
-                continue
-            lines.append(f"{key} = {cls._toml_value(child)}")
+                nested_items.append((key, child))
+            else:
+                scalar_items.append((key, child))
 
-        lines.append("")
+        return scalar_items, nested_items
 
-        for key, child in value.items():
+    @classmethod
+    def _append_toml_sections(cls,
+                              lines: list[str],
+                              *,
+                              section: str,
+                              value: Mapping[str, Any],
+                              depth: int,
+                              delimiter_levels: int,
+                              ) -> None:
+        if not cls._has_renderable_content(value):
+            return
+        
+        scalar_items, nested_items = cls._partition_items(value)
+
+        # Public levels are one-based:
+        # delimiter_levels=1 renders headings at internal depth 0.
+        if depth < delimiter_levels:
+            cls._append_heading(lines,
+                                section=section,
+                                depth=depth,)
+
+        # Do not render an empty TOML section when this mapping only
+        # contains nested mappings.
+        if scalar_items:
+            lines.append(f"[{section}]")
+
+            for key, child in scalar_items:
+                lines.append(f"{key} = {cls._toml_value(child)}")
+
+            lines.append("")
+
+        for key, child in nested_items:
+            cls._append_toml_sections(lines,
+                                      section=f"{section}.{key}",
+                                      value=child,
+                                      depth=depth + 1,
+                                      delimiter_levels=delimiter_levels,)
+
+    @classmethod
+    def _has_renderable_content(cls, value: Mapping[str, Any],) -> bool:
+        """
+        Return whether a mapping contains at least one scalar value,
+        directly or in a nested mapping.
+        """
+        for _, child in value.items():
             if isinstance(child, Mapping):
-                cls._append_toml_sections(lines, f"{section}.{key}", child)
+                if child and cls._has_renderable_content(child):
+                    return True
+            else:
+                return True
 
-    def render(self) -> str:
-        delimiter = "----------------------"
-        lines = [
-            delimiter,
-            "ARTIFACT METADATA",
-            delimiter,
-            "",
-        ]
+        return False
+    
+    def render(self, *, delimiter_levels: int = 2,) -> str:
+        """
+        Render the payload as a TOML-like ImageJ metadata summary.
+
+        ``delimiter_levels`` controls how many nesting levels receive a
+        visual heading:
+
+        - 0: no delimiter headings
+        - 1: top-level sections only
+        - 2: top-level and direct child sections
+        - 3: include one additional nested level
+        - 4: include one additional nested levels
+        - 5: include the last additional nested levels
+        
+        Up to 5 levels are supported. Levels beyond 5 will only use the same format as 5.
+        """
+        if delimiter_levels < 0:
+            raise ValueError("delimiter_levels must be non-negative.")
 
         if not self.payload:
-            return "\n".join(lines) + "\n"
+            return ""
 
-        for i, (key, value) in enumerate(self.payload.items()):
-            if i > 0:
-                lines.append("---")
+        lines: list[str] = []
+
+        for key, value in self.payload.items():
+            key = str(key)
 
             if isinstance(value, Mapping):
-                self._append_toml_sections(lines, key, value)
+                self._append_toml_sections(
+                    lines,
+                    section=key,
+                    value=value,
+                    depth=0,
+                    delimiter_levels=delimiter_levels,)
             else:
                 lines.append(f"{key} = {self._toml_value(value)}")
                 lines.append("")
 
-        return "\n".join(lines) + "\n"
+        return "\n".join(lines).rstrip() + "\n"
    
             
 def make_color_lut(color: str) -> NDArray[np.uint8]:

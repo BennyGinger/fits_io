@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Mapping, Sequence, Any
+from typing import Any
 
+import numpy as np
 from numpy.typing import NDArray
 
 from fits_io.readers._types import Zproj
@@ -10,87 +12,62 @@ from fits_io.readers.protocol import ImageReader
 from fits_io.readers.r_tiff import TiffReader
 from fits_io.metadata.models import FitsIOMeta
 from fits_io.metadata.tiff_meta import assemble_tiff_metadata
-from fits_io.metadata.resolve import resolve_channel_selection, resolve_output_axes
-from fits_io.metadata.payload import assemble_payload
-from fits_io.writers.filesystem import build_output_paths
+from fits_io.metadata.resolve import move_or_add_channel_axis, resolve_channel_selection, resolve_merged_axes, resolve_output_axes
+from fits_io.metadata.payload import assemble_payload, build_payload
+from fits_io.writers.models import ChannelMergeResult, ConversionPreparation, ChannelSelection
 from fits_io.writers.core import save_tiff
+from fits_io.writers.filesystem import build_output_path
 
-DEFAULT_OUTPUT_NAME = 'fits.tif'
 
 
-def convert_to_fits_tif(img_reader: ImageReader, 
-                        *, 
-                        output_name: str = DEFAULT_OUTPUT_NAME, 
-                        channel_labels: str | Sequence[str] | None = None, 
-                        export_channels: str | Sequence[str] = 'all',
-                        artifact_type: str = "image", 
-                        custom_metadata: Mapping[str, Any] | None = None, 
-                        z_projection: Zproj = None, 
-                        compression: str | None = 'zlib'
-                        ) -> list[Path]:
+def prepare_conversion(img_reader: ImageReader,
+                       *,
+                       selection: ChannelSelection,
+                       output_name: str,
+                       artifact_kind: str | None = None,
+                       created_by: str | None = None,
+                       custom_metadata: Mapping[str, Any] | None = None,
+                       z_projection: Zproj = None,
+                       ) -> ConversionPreparation:
     """
-    Convert an image file to a FITS TIFF with ImageJ metadata. Supported input formats depend on installed image readers.
+    Prepare an array for initial conversion.
+
+    The channel selection must already be resolved so that the same selection
+    can subsequently be used to build the output metadata.
+
     Args:
-        img_reader : An ImageReader instance for the input image.
-        output_name : Optional name of the output TIFF file.
-        channel_labels : Optional labels for source channels (used for mapping), if None, default labels will be used. 
-        export_channels : Subset channels to export. Can be 'all' or a list of channel labels, by default 'all'.
-        custom_metadata : Additional custom metadata to include in the TIFF file, by default None.
-        artifact_type : Generic artifact type/category for created files. By default "image"
-        derived_from : Generic lineage reference of the artifact type. By default "raw_image"
-        z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
-        compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'.
+        img_reader:
+            Reader for the source image.
+        selection:
+            Resolved channels to extract from the source image.
+        z_projection:
+            Optional z-projection to apply while reading.
+
     Returns:
-        List of Paths of the saved TIFF files.
+        The selected and optionally projected image array.
     """
-    # Split into series if applicable
-    series_readers = img_reader.split_series()
+    array = img_reader.get_channel(channel=selection.export_indices, 
+                                   z_projection=z_projection,)
     
-    # Get the save directories of the image and generate the save path(s)
-    save_path_lst = build_output_paths(series_readers, output_name)
+    output_path = build_output_path(img_reader, save_name=output_name)
     
-    # Resolve channel labels and export channels
-    selection = resolve_channel_selection(channel_labels, 
-                                          n_channels=img_reader.channel_count,
-                                          export_channels=export_channels)
-
-    # Get the image array(s)
-    arrays = [reader.get_channel(selection.export_indices, z_projection)
-                                  for reader in series_readers]
-    
-    if len(arrays) != len(save_path_lst):
-        raise ValueError(f"Got {len(arrays)} arrays but {len(save_path_lst)} save paths")
-
-    # Build metadata and save each array with its corresponding path
-    for array, path, reader in zip(arrays, save_path_lst, series_readers):
-        out_axes = resolve_output_axes(reader_axes=reader.axes, 
-                                       z_projection=z_projection, 
-                                       n_channels=len(selection.export_labels))
-        selection.validate_array(array_shape=array.shape, axes=out_axes)
-        
-        meta = assemble_payload(reader.metadata,
-                             artifact_type = artifact_type,
-                             created_by = "fits_io",
-                             derived_from = "raw_image",
-                             axes = out_axes,
-                             channel_labels = selection.export_labels,
-                             source_channel_indices = [i for i in range(reader.channel_count)],
-                             artifact_channel_indices = selection.export_indices,
-                             z_projection = z_projection,
-                             custom_metadata = custom_metadata)
-        meta_write = assemble_tiff_metadata(meta, 
-                                            reader.interval, 
-                                            reader.resolution)
-        # save TIFF
-        save_tiff(array, path, meta_write, compression=compression)
-    return save_path_lst
+    metadata = build_payload(img_reader,
+                             selection=selection,
+                             artifact_kind=artifact_kind,
+                             created_by=created_by,
+                             z_projection=z_projection,
+                             custom_metadata=custom_metadata,
+                             array_shape=array.shape,)
+    return ConversionPreparation(array=array, 
+                                 output_path=output_path,
+                                 metadata=metadata)
 
 
 def save_array(img_reader: ImageReader, 
                array: NDArray[Any], 
                *, 
                fitsio_metadata: FitsIOMeta,
-               output_name: str = DEFAULT_OUTPUT_NAME, 
+               output_path: Path, 
                compression: str | None = 'zlib', 
                ) -> Path:
     """
@@ -104,18 +81,13 @@ def save_array(img_reader: ImageReader,
     Args:
         img_reader : An ImageReader instance for the input image.
         array : The NumPy array to save.
-        output_name : Optional name of the output TIFF file.
-        custom_metadata : Additional custom metadata to include in the TIFF file, by default None.
-        artifact_type (str, optional): Generic artifact category/name for the output artifact.
-        created_by (str, optional): Producer identity for the output artifact (e.g. distribution, tool, or step identifier).
-        derived_from (str, optional): Generic parent reference (parent artifact type).
+        output_path : The path of the output TIFF file.
+        fitsio_metadata : The FitsIOMeta object containing the metadata to write to the output file.
         compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'.
     
     Returns:
         Path: The path of the saved TIFF file.
     """
-    save_path = img_reader.img_path.with_name(output_name)
-
     # Check compression method
     if compression is None:
         current_compression = img_reader.compression_method
@@ -126,8 +98,8 @@ def save_array(img_reader: ImageReader,
                                         img_reader.interval, 
                                         img_reader.resolution)
     
-    save_tiff(array, save_path, meta_write, compression=current_compression)
-    return save_path
+    save_tiff(array, output_path, meta_write, compression=current_compression)
+    return output_path
 
 
 def set_channel_labels(img_reader: ImageReader, 
@@ -202,7 +174,57 @@ def apply_zproj(img_reader: ImageReader,
     return img_reader.img_path
 
 
-    
+def merge_channel_arrays(*,
+                         existing_array: NDArray[Any],
+                         existing_axes: str,
+                         existing_channel_indices: Sequence[int],
+                         new_array: NDArray[Any],
+                         new_axes: str,
+                         new_channel_indices: Sequence[int],
+                         reference_axes: str,
+                         ) -> ChannelMergeResult:
+    """
+    Append newly produced channels to an existing channel artifact.
+
+    Arrays without a C axis are treated as single-channel arrays. The output
+    channel-axis position follows the existing artifact when it already has a
+    C axis; otherwise, it follows the reference axes.
+    """
+    merged_axes, channel_axis = resolve_merged_axes(
+        existing_axes=existing_axes,
+        reference_axes=reference_axes,
+    )
+
+    existing_with_c = move_or_add_channel_axis(
+        array=existing_array,
+        axes=existing_axes,
+        target_position=channel_axis,
+    )
+    new_with_c = move_or_add_channel_axis(
+        array=new_array,
+        axes=new_axes,
+        target_position=channel_axis,
+    )
+
+    merged_array = np.concatenate(
+        [existing_with_c, new_with_c],
+        axis=channel_axis,
+    )
+
+    return ChannelMergeResult(
+        array=merged_array,
+        axes=merged_axes,
+        channel_indices=[
+            *existing_channel_indices,
+            *new_channel_indices,
+        ],
+    )
+
+
+
+
+
+
     
 
     

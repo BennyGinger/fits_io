@@ -111,7 +111,7 @@ def assemble_tiff_metadata(payload: FitsIOMeta, interval: float | None, resoluti
     info = InfoSummary(payload=payload.to_info_payload())
 
     imagej_meta = stack_meta.to_dict()
-    imagej_meta["Info"] = info.render()
+    imagej_meta["Info"] = info.render(delimiter_levels=3)
     imagej_meta.update(channel_meta.to_dict())
     imagej_meta.update(resolution_meta.to_dict())
 

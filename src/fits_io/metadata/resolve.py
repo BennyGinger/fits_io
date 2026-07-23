@@ -1,49 +1,17 @@
-from dataclasses import dataclass
-from typing import Sequence
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import Any
 import logging
 
+import numpy as np
+from numpy.typing import NDArray
+
 from fits_io.readers._types import Zproj, validate_axes
+from fits_io.writers.models import ChannelSelection
 
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(slots=True, frozen=True)
-class ChannelSelection:
-    """
-    Represents the selection of channels for export, including the source labels, export labels, and export indices.
-    
-    Attributes:
-        source_labels: The original channel labels from the reader.
-        export_labels: The labels of the channels to be exported.
-        export_indices: The indices of the channels to be exported, corresponding to the source labels.
-    """
-    source_labels: list[str]
-    export_labels: list[str]
-    export_indices: list[int]
-    
-    def validate_array(self, array_shape: tuple[int, ...], axes: str) -> None:
-        """
-        Validate that the provided array shape and axes match the expected channel selection.
-        
-        Args:
-            array_shape: The shape of the array to validate.
-            axes: The axes string corresponding to the array.
-        """
-        validate_axes(axes)
-
-        if len(array_shape) != len(axes):
-            raise ValueError(f"Array shape {array_shape} does not match axes '{axes}'.")
-
-        c_index = axes.find('C')
-        if c_index == -1:
-            if len(self.export_indices) > 1:
-                raise ValueError(f"Array has no channel axis, but export indices are {self.export_indices}.")
-            else:
-                return  # No channel axis and only one channel selected, valid case.
-        c_axis_size = array_shape[c_index]
-        if c_axis_size != len(self.export_indices):
-            raise ValueError(f"Array channel axis size {c_axis_size} does not match number of export channels {len(self.export_indices)}.")
 
 
 ############# Public APIs ##############################
@@ -64,7 +32,9 @@ def resolve_channel_selection(channel_labels: str | Sequence[str] | None,
     """
     source_labels = _resolve_channel_labels(channel_labels, n_channels)
     export_labels, export_indices = _resolve_export_channels(export_channels, source_labels)
-    return ChannelSelection(source_labels=source_labels, export_labels=export_labels, export_indices=export_indices)
+    return ChannelSelection(source_labels=source_labels, 
+                            export_labels=export_labels, 
+                            export_indices=export_indices)
 
 
 def resolve_output_axes(reader_axes: str, z_projection: Zproj, n_channels: int) -> str:
@@ -91,6 +61,44 @@ def remap_channel_indices(current_artifact_indices: list[int] | None, selected_l
     return [current_artifact_indices[i] for i in selected_local_indices]
 
 
+def resolve_merged_axes(*, existing_axes: str, reference_axes: str,) -> tuple[str, int]:
+    """
+    Resolve the merged axes and position of the channel axis.
+    """
+    if "C" in existing_axes:
+        return existing_axes, existing_axes.index("C")
+
+    if "C" in reference_axes:
+        channel_position = reference_axes.index("C")
+    else:
+        try:
+            channel_position = existing_axes.index("Y")
+        except ValueError as exc:
+            raise ValueError(f"Cannot insert a channel axis into axes {existing_axes!r}: "
+                             "the reference has no C axis and the existing axes have no Y axis."
+                             ) from exc
+
+    merged_axes = (existing_axes[:channel_position]+ "C" + existing_axes[channel_position:])
+
+    return merged_axes, channel_position
+
+
+def move_or_add_channel_axis(*,
+                              array: NDArray[Any],
+                              axes: str,
+                              target_position: int,
+                              ) -> NDArray[Any]:
+    """
+    Ensure that an array has its channel axis at the requested position.
+    """
+    if "C" not in axes:
+        return np.expand_dims(array, axis=target_position)
+
+    current_position = axes.index("C")
+    if current_position == target_position:
+        return array
+
+    return np.moveaxis(array, current_position, target_position)
 ############ Private helper functions ###########################
 
 def _resolve_channel_labels(channel_labels: str | Sequence[str] | None, n_channels: int) -> list[str]:

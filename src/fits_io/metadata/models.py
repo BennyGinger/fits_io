@@ -17,8 +17,8 @@ class ArtifactMeta:
     derived_from: str | None = None
     axes: str | None = None
     channel_labels: list[str] | None = None
-    source_channel_indices: list[int] | None = None
-    artifact_channel_indices: list[int] | None = None
+    source_channel_indices: list[int] = field(default_factory=list)
+    artifact_channel_indices: list[int] = field(default_factory=list)
     z_projection: Zproj = None
 
     def __post_init__(self) -> None:
