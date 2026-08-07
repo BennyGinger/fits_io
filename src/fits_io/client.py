@@ -125,7 +125,7 @@ class FitsIO:
         Returns:
             ArrayResult : A dataclass containing the NumPy array and the axes string.
         """
-        chan_positions = self._resolve_channel_positions(channel)
+        chan_positions = self.resolve_channel_positions(channel)
         out_axes = self._resolve_output_axes(z_projection=z_projection, n_channels=len(chan_positions),)
         array = self.reader.get_channel(chan_positions, z_projection=z_projection)
         
@@ -190,6 +190,8 @@ class FitsIO:
     def indices_to_labels(self, source_indices: int | Sequence[int],) -> list[str]:
         """
         Resolve source channel indices represented by the current artifact back to their channel labels.
+        
+        Duplicate source indices are ignored while preserving the first occurrence.
         """
         artifact_labels = self.channel_labels
         artifact_source_indices = self.artifact_channel_indices
@@ -204,9 +206,12 @@ class FitsIO:
 
         source_to_label = dict(zip(artifact_source_indices, artifact_labels, strict=True))
 
+        if isinstance(source_indices, int):
+            source_indices = [source_indices]
+
+        source_indices = list(dict.fromkeys(source_indices)) # Remove duplicates while preserving order
+
         try:
-            if isinstance(source_indices, int):
-                source_indices = [source_indices]
             return [source_to_label[index] for index in source_indices]
         except KeyError as exc:
             missing_index = exc.args[0]
@@ -232,8 +237,32 @@ class FitsIO:
         return resolve_channel_selection(channel_labels=channel_labels,
                                          n_channels=self.reader.channel_count,
                                          export_channels=export_channels)
-    
-      
+
+
+    def resolve_channel_positions(self, channels: int | str | Sequence[int | str]) -> list[int]:
+        """
+        Resolve channel position from the provided channel selector(s) to always return a list of integer indices. 
+        """
+        if isinstance(channels, (int, str)):
+            channels = [channels]
+        
+        channels = list(channels)
+        if not channels:
+            raise ValueError("At least one channel must be selected.")
+        
+        labels = self.channel_labels
+        
+        if 'C' not in self.axes:
+            positions = self._resolve_singleton_positions(channels, labels)
+        
+        else:
+            positions = self._resolve_multichannel_positions(channels, labels)
+        
+        if len(positions) != len(set(positions)):
+            raise ValueError(f"Duplicate channel selection: {channels!r}.")
+        return positions    
+
+     
     def prepare_conversion(self,
                            selection: ChannelSelection,
                            *,
@@ -386,7 +415,7 @@ class FitsIO:
                                  array=self.get_array().array,
                                  channel_positions=(),)
 
-        excluded_positions = set(self._resolve_channel_positions(excluded_labels))
+        excluded_positions = set(self.resolve_channel_positions(excluded_labels))
 
         included_positions = tuple(position
                                    for position in range(self.reader.channel_count)
@@ -410,7 +439,7 @@ class FitsIO:
         """
         Return the complete array with selected channels replaced.
         """
-        chan_positions = self._resolve_channel_positions(channel)
+        chan_positions = self.resolve_channel_positions(channel)
         result = self.get_array()
         output = result.array
         
@@ -468,44 +497,6 @@ class FitsIO:
         return getattr(self.reader, name)
 
 
-    def _resolve_channel_positions(self, channels: int | str | Sequence[int | str]) -> list[int]:
-        """
-        Resolve channel position from the provided channel selector(s) to always return a list of integer indices. 
-        """
-        if "C" not in self.axes:
-            raise ValueError("Cannot select channels: the input has no C axis.")
-        
-        if isinstance(channels, (int, str)):
-            channels = [channels]
-        
-        channels = list(channels)
-        if not channels:
-            raise ValueError("At least one channel must be selected.")
-        
-        labels = self.channel_labels
-        mapping = {lbl: pos for pos, lbl in enumerate(labels)}
-
-        positions: list[int] = []
-        for ch in channels:
-            if isinstance(ch, int):
-                if ch < 0 or ch >= len(labels):
-                    raise ValueError(f"Channel index {ch} is out of range. "
-                                     f"Available indices: 0 to {len(labels) - 1}.")
-                positions.append(ch)
-            
-            elif isinstance(ch, str):
-                try:
-                    positions.append(mapping[ch])
-                except KeyError as exc:
-                    raise KeyError(f"Unknown channel label {ch!r}. Available labels: {labels}") from exc
-            else:
-                raise TypeError(f"Expected int or str channel, got {type(ch).__name__}")
-        
-        if len(positions) != len(set(positions)):
-            raise ValueError(f"Duplicate channel selection: {channels!r}.")
-        return positions
-
-
     def _resolve_output_axes(self, z_projection: Zproj = None, n_channels: int | None = None) -> str:
         """
         Resolve output axes string for ImageJ metadata based on the current reader's axes and provided parameters.
@@ -522,23 +513,49 @@ class FitsIO:
         return resolve_output_axes(reader_axes=self.reader.axes,
                                    z_projection=z_projection,
                                    n_channels=n_channels)
+   
+    def _resolve_singleton_positions(self, channels: Sequence[int | str], labels: Sequence[str]) -> list[int]:
+        if len(labels) != 1:
+            raise ValueError("No 'C' axis in the image, but multiple channel labels are present. Cannot resolve channel positions.")
     
+        valid_label = labels[0]
+        positions: list[int] = []
+        
+        for ch in channels:
+            if isinstance(ch, int):
+                if ch != 0:
+                    raise ValueError(f"Channel index {ch} is out of range. This single-channel image only has channel index 0.")
+                positions.append(0)
+            
+            elif isinstance(ch, str):
+                if ch != valid_label:
+                    raise ValueError(f"Channel label {ch!r} is not valid. This single-channel image only has channel label {valid_label!r}.")
+                positions.append(0)
+            
+            else:
+                raise TypeError(f"Expected int or str channel, got {type(ch).__name__}")
+        
+        return positions
     
+    def _resolve_multichannel_positions(self, channels: Sequence[int | str], labels: Sequence[str]) -> list[int]:
+        mapping = {label: position
+                   for position, label in enumerate(labels)} 
+                    
+        positions = []
+        
+        for ch in channels:
+            if isinstance(ch, int):
+                if ch < 0 or ch >= len(labels):
+                    raise ValueError(f"Channel index {ch} is out of range. "
+                                    f"Available indices: 0 to {len(labels) - 1}.")
+                positions.append(ch)
+            
+            elif isinstance(ch, str):
+                try:
+                    positions.append(mapping[ch])
+                except KeyError as exc:
+                    raise ValueError(f"Unknown channel label {ch!r}. Available labels: {labels}") from exc
+            else:
+                raise TypeError(f"Expected int or str channel, got {type(ch).__name__}")
+        return positions
 
-# if __name__ == "__main__":
-#     path = Path("/media/ben/Analysis/Python/Images/nd2/Run2/c2z25t23v1_nd2.nd2")
-    
-#     reader = FitsIO.from_path(path)
-#     readers = reader.split_series()
-#     selection = reader.resolve_channel_selection()
-#     file_path = readers[0].convert_to_fits(output_name="test_output.tif", export_indices=selection.export_indices, export_labels=selection.export_labels)
-    
-#     read2 = FitsIO.from_path(file_path)
-#     read2.set_channel_labels(["RFP", "yellow"])
-#     red = read2.get_channel("yellow")
-    
-#     path2 = read2.save_array(red, output_name="red_channel.tif", export_channels="yellow", custom_metadata={"note": "red channel only"})
-    
-#     input("Press Enter to continue...")
-#     read3 = FitsIO.from_path(path2)
-#     read3.apply_z_projection("max", compression=None)

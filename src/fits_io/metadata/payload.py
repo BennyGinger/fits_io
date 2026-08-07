@@ -5,9 +5,10 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Mapping
 
 from fits_io.metadata.models import FitsIOMeta
-from fits_io.metadata.resolve import remap_channel_indices, resolve_output_axes, ChannelSelection
+from fits_io.metadata.resolve import remap_channel_indices, resolve_output_axes
 from fits_io.readers._types import Zproj
 from fits_io.readers.protocol import ImageReader
+from fits_io.writers.models import ChannelSelection
 
 
 

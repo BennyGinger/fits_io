@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 import logging

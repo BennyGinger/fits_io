@@ -1,8 +1,9 @@
 from pathlib import Path
 import re
-from typing import Sequence
 
-from fits_io.readers.factory import ImageReader
+from fits_io.readers.protocol import ImageReader
+
+
 
 DEFAULT_SAVE_NAME = "array.tif"
 
