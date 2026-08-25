@@ -69,6 +69,12 @@ class FitsIO:
     
     
     @property
+    def interval(self) -> float | None:
+        """Return the frame interval in seconds."""
+        return self.reader.interval
+    
+    
+    @property
     def artifact_channel_indices(self) -> list[int]:
         """
         Returns the current source indices of the artifacts.
