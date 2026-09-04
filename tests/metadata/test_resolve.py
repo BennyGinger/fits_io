@@ -89,11 +89,10 @@ def test_channel_selection_validate_array_raises_on_shape_axes_mismatch():
         sel.validate_array(array_shape=(128, 128), axes="TYX")
 
 
-def test_channel_selection_validate_array_raises_without_c_axis_and_nonzero_index():
+def test_channel_selection_validate_array_accepts_one_selected_channel_without_c_axis():
     sel = ChannelSelection(
         source_labels=["DAPI", "GFP"],
         export_labels=["GFP"],
         export_indices=[1],
     )
-    with pytest.raises(ValueError, match="no channel axis"):
-        sel.validate_array(array_shape=(64, 64), axes="YX")
+    sel.validate_array(array_shape=(64, 64), axes="YX")

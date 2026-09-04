@@ -109,14 +109,12 @@ def test_infosummary_renders_generic_fits_metadata_block():
     )
 
     rendered = summary.render()
-    assert "FITS METADATA" in rendered
+    assert "fits_io" in rendered
     assert 'channel_labels = ["GFP", "RFP"]' in rendered
     assert 'version = "1.2.3"' in rendered
     assert 'axes = "TCYX"' in rendered
     assert 'z_projection = "max"' in rendered
-    assert 'compression = "zlib"' in rendered
     assert "source_channel_indices = [0, 2]" in rendered
-    assert "source_channel_count = 3" in rendered
     assert "[project_metadata]" in rendered
     assert 'run = "A"' in rendered
     assert '[project_metadata.tracking]' in rendered

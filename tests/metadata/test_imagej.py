@@ -10,7 +10,6 @@ def _make_payload() -> FitsIOMeta:
         version="x",
         axes="TZCYX",
         channel_labels=["GFP", "mCherry"],
-        n_channels=2,
         z_projection=None,
     ).with_custom_metadata({"existing": "data"})
 
@@ -31,10 +30,9 @@ def test_build_tiff_metadata_encodes_payload_in_extratags():
         version="x",
         axes="TZCYX",
         channel_labels=["GFP", "mCherry"],
-        n_channels=2,
         z_projection="mean",
         source_channel_indices=[0, 1],
-        source_channel_count=2,
+        artifact_channel_indices=[0, 1],
     ).with_custom_metadata({"param": "value"})
     out = assemble_tiff_metadata(payload, interval=11.0, resolution=(0.5, 0.25))
 

@@ -1,89 +1,83 @@
 from __future__ import annotations
 
-import numpy as np
 import pytest
 
-from fits_io.metadata.models import FitsIOMeta
 from fits_io.writers import apis
+from fits_io.metadata.resolve import resolve_channel_selection
+
+
+def _set_channel_array(dummy_reader, channel_count: int) -> None:
+    """Give the shared dummy reader internally consistent CYX data."""
+    import numpy as np
+
+    dummy_reader._axes = "CYX"
+    dummy_reader.channel_array = np.ones(
+        (channel_count, 2, 3), dtype=np.uint8)
 
 
 # -----------------------------------
-# convert_to_fits_tif()
+# prepare_conversion()
 # -----------------------------------
 
-def test_convert_to_fits_tif_returns_output_paths(monkeypatch, dummy_reader) -> None:
+def test_prepare_conversion_returns_output_path(monkeypatch, dummy_reader) -> None:
+    _set_channel_array(dummy_reader, 3)
     out_path = dummy_reader.img_path.with_name("fits.tif")
-    monkeypatch.setattr(apis, "build_output_paths", lambda _series, _name: [out_path])
-    monkeypatch.setattr(apis, "save_tiff", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        apis, "build_output_path", lambda _reader, save_name: out_path)
+    selection = resolve_channel_selection(None, dummy_reader.channel_count)
 
-    out = apis.convert_to_fits_tif(dummy_reader)
+    result = apis.prepare_conversion(
+        dummy_reader, selection=selection, output_name="fits.tif")
 
-    assert out == [out_path]
+    assert result.output_path == out_path
 
 
-def test_convert_to_fits_tif_writes_one_file_per_series(monkeypatch, dummy_reader) -> None:
-    s1 = dummy_reader.img_path.with_name("img_s1") / "fits.tif"
-    s2 = dummy_reader.img_path.with_name("img_s2") / "fits.tif"
-
-    r1 = type(dummy_reader)(img_path=dummy_reader.img_path, series_idx=0)
-    r2 = type(dummy_reader)(img_path=dummy_reader.img_path, series_idx=1)
-    monkeypatch.setattr(dummy_reader, "split_series", lambda: [r1, r2])
-
-    monkeypatch.setattr(apis, "build_output_paths", lambda _series, _name: [s1, s2])
-
-    saved: list[dict[str, object]] = []
+def test_prepare_conversion_reads_selected_channels(monkeypatch, dummy_reader) -> None:
+    _set_channel_array(dummy_reader, 2)
+    selection = resolve_channel_selection(
+        ["DAPI", "GFP", "RFP"], 3, ["GFP", "RFP"])
     monkeypatch.setattr(
         apis,
-        "save_tiff",
-        lambda array, path, _meta, compression=None: saved.append({"array": array, "path": path, "compression": compression}),
-    )
+        "build_output_path",
+        lambda _reader, save_name: dummy_reader.img_path.with_name(save_name),)
 
-    out = apis.convert_to_fits_tif(dummy_reader, output_name="fits.tif", compression="zlib")
+    apis.prepare_conversion(
+        dummy_reader, selection=selection, output_name="fits.tif")
 
-    assert out == [s1, s2]
-    assert [x["path"] for x in saved] == [s1, s2]
-    assert [x["compression"] for x in saved] == ["zlib", "zlib"]
+    assert dummy_reader.last_get_channel_arg == [1, 2]
 
 
-def test_convert_to_fits_tif_sets_source_channel_identity_for_subset(monkeypatch, dummy_reader) -> None:
-    monkeypatch.setattr(apis, "build_output_paths", lambda _series, _name: [dummy_reader.img_path.with_name("fits.tif")])
-    monkeypatch.setattr(apis, "save_tiff", lambda *_args, **_kwargs: None)
+def test_prepare_conversion_sets_channel_lineage(monkeypatch, dummy_reader) -> None:
+    _set_channel_array(dummy_reader, 2)
+    selection = resolve_channel_selection(
+        ["DAPI", "GFP", "RFP"], 3, ["GFP", "RFP"])
+    monkeypatch.setattr(
+        apis,
+        "build_output_path",
+        lambda _reader, save_name: dummy_reader.img_path.with_name(save_name),)
 
-    built: list[dict[str, object]] = []
+    result = apis.prepare_conversion(
+        dummy_reader, selection=selection, output_name="fits.tif")
 
-    def fake_build_payload(base: FitsIOMeta, **kwargs):
-        built.append(kwargs)
-        return base.with_fitsio(**{k: v for k, v in kwargs.items() if k in {
-            "axes", "channel_labels", "n_channels", "source_channel_indices", "source_channel_count", "z_projection", "compression"
-        }})
+    assert result.metadata.fits_io.source_channel_indices == [0, 1, 2]
+    assert result.metadata.fits_io.artifact_channel_indices == [1, 2]
 
-    monkeypatch.setattr(apis, "build_payload", fake_build_payload)
 
-    apis.convert_to_fits_tif(
+def test_prepare_conversion_passes_custom_metadata(monkeypatch, dummy_reader) -> None:
+    _set_channel_array(dummy_reader, 3)
+    selection = resolve_channel_selection(None, dummy_reader.channel_count)
+    monkeypatch.setattr(
+        apis,
+        "build_output_path",
+        lambda _reader, save_name: dummy_reader.img_path.with_name(save_name),)
+
+    result = apis.prepare_conversion(
         dummy_reader,
-        channel_labels=["DAPI", "GFP", "RFP"],
-        export_channels=["GFP", "RFP"],
-    )
+        selection=selection,
+        output_name="fits.tif",
+        custom_metadata={"run_id": 7},)
 
-    assert built[0]["source_channel_count"] == 3
-    assert built[0]["source_channel_indices"] == [1, 2]
-
-
-def test_convert_to_fits_tif_passes_custom_metadata(monkeypatch, dummy_reader) -> None:
-    monkeypatch.setattr(apis, "build_output_paths", lambda _series, _name: [dummy_reader.img_path.with_name("fits.tif")])
-    monkeypatch.setattr(apis, "save_tiff", lambda *_args, **_kwargs: None)
-
-    seen: list[dict[str, object]] = []
-
-    def fake_build_payload(base: FitsIOMeta, **kwargs):
-        seen.append(kwargs)
-        return base.with_custom_metadata(kwargs.get("custom_metadata"))
-
-    monkeypatch.setattr(apis, "build_payload", fake_build_payload)
-
-    apis.convert_to_fits_tif(dummy_reader, custom_metadata={"run_id": 7})
-
-    assert seen[0]["custom_metadata"] == {"run_id": 7}
+    assert result.metadata.custom_metadata == {"run_id": 7}
 
 
 # -----------------------------------

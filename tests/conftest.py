@@ -148,7 +148,11 @@ class DummyReader(ImageReader):
 
     @property
     def metadata(self) -> FitsIOMeta:
-        return FitsIOMeta().with_fitsio(channel_labels=list(self._labels or []), n_channels=self.channel_count)
+        indices = list(range(self.channel_count))
+        return FitsIOMeta().with_fitsio(
+            channel_labels=list(self._labels or []),
+            source_channel_indices=indices,
+            artifact_channel_indices=indices,)
 
     def get_array(self, z_projection: Zproj = None) -> NDArray:
         self.called_get_array += 1

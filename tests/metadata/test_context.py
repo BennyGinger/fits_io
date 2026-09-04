@@ -8,20 +8,17 @@ def test_build_payload_sets_requested_fits_io_fields():
         base,
         axes="TCYX",
         channel_labels=["GFP", "RFP"],
-        n_channels=2,
         source_channel_indices=[0, 2],
-        source_channel_count=3,
+        artifact_channel_indices=[0, 2],
         z_projection="max",
-        compression="zlib",
     )
 
     assert out.fits_io.axes == "TCYX"
     assert out.fits_io.channel_labels == ["GFP", "RFP"]
-    assert out.fits_io.n_channels == 2
+    assert out.fits_io.channel_count == 2
     assert out.fits_io.source_channel_indices == [0, 2]
-    assert out.fits_io.source_channel_count == 3
+    assert out.fits_io.artifact_channel_indices == [0, 2]
     assert out.fits_io.z_projection == "max"
-    assert out.fits_io.compression == "zlib"
 
 
 def test_build_payload_merges_custom_metadata_when_provided():
