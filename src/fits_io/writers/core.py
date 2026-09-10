@@ -1,4 +1,6 @@
+import errno
 import tempfile
+import time
 from pathlib import Path
 import logging
 
@@ -9,6 +11,24 @@ from fits_io.metadata.tiff_meta import TiffWriteMeta
 
 
 logger = logging.getLogger(__name__)
+
+
+def _replace_with_retry(source: Path, destination: Path) -> None:
+    """Publish a completed TIFF, allowing temporary sharing locks to clear."""
+    delays = (0.25, 0.5, 1.0, 2.0, 4.0)
+    for attempt in range(len(delays) + 1):
+        try:
+            source.replace(destination)
+            return
+        except OSError as error:
+            busy = error.errno == errno.EBUSY or getattr(error, "winerror", None) in {32, 33}
+            if not busy or attempt == len(delays):
+                raise
+            logger.warning(
+                "TIFF rename is busy for %s; retrying in %.2f seconds (%d/%d).",
+                destination, delays[attempt], attempt + 1, len(delays),
+            )
+            time.sleep(delays[attempt])
 
 
 def save_tiff(img_array: NDArray, 
@@ -39,9 +59,12 @@ def save_tiff(img_array: NDArray,
                 extratags=metadata.extratags,
                 compression=compression,)
         
-        tmp_path.replace(save_path)
+        _replace_with_retry(tmp_path, save_path)
         logger.debug(f"Saved TIFF file at {save_path}")
     except Exception:
-        tmp_path.unlink(missing_ok=True)
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove temporary TIFF %s", tmp_path, exc_info=True)
         logger.exception(f"Failed to save TIFF file at {save_path}")
         raise

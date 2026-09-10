@@ -65,3 +65,72 @@ def test_save_tiff_predictor_selection(
     assert captured["kwargs"]["predictor"] == expected_predictor
     assert captured["kwargs"]["compression"] == compression
     assert captured["kwargs"]["imagej"] is True
+
+
+@pytest.mark.parametrize("winerror", [None, 32, 33])
+def test_save_tiff_recovers_from_busy_rename(monkeypatch, tmp_path, winerror):
+    import errno
+    from tifffile import imread
+
+    destination = tmp_path / "out.tif"
+    destination.write_bytes(b"previous output")
+    replace = Path.replace
+    attempts = []
+    delays = []
+    error = OSError(errno.EBUSY if winerror is None else errno.EACCES, "busy")
+    if winerror is not None:
+        error.winerror = winerror
+
+    def busy_then_replace(source, target):
+        attempts.append(source)
+        if len(attempts) <= 2:
+            assert destination.read_bytes() == b"previous output"
+            raise error
+        return replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", busy_then_replace)
+    monkeypatch.setattr(core.time, "sleep", delays.append)
+    arr = np.ones((5, 6), dtype=np.uint16)
+    meta = SimpleNamespace(imagej_meta={"axes": "YX"}, resolution=None, extratags=[])
+    core.save_tiff(arr, destination, meta, compression=None)
+
+    np.testing.assert_array_equal(imread(destination), arr)
+    assert len(attempts) == 3
+    assert len(set(attempts)) == 1
+    assert delays == [0.25, 0.5]
+    assert list(tmp_path.iterdir()) == [destination]
+
+
+@pytest.mark.parametrize("error_number, expected_attempts", [(16, 6), (13, 1), (30, 1)])
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_save_tiff_preserves_original_error_and_output(
+    monkeypatch, tmp_path, error_number, expected_attempts, cleanup_fails,
+):
+    destination = tmp_path / "out.tif"
+    destination.write_bytes(b"previous output")
+    error = OSError(error_number, "rename failed")
+    attempts = []
+    delays = []
+
+    def fail_replace(source, target):
+        attempts.append(source)
+        raise error
+
+    def fail_cleanup(*args, **kwargs):
+        raise OSError("cleanup failed")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    monkeypatch.setattr(core.time, "sleep", delays.append)
+    if cleanup_fails:
+        monkeypatch.setattr(Path, "unlink", fail_cleanup)
+    arr = np.ones((5, 6), dtype=np.uint16)
+    meta = SimpleNamespace(imagej_meta={"axes": "YX"}, resolution=None, extratags=[])
+    with pytest.raises(OSError) as caught:
+        core.save_tiff(arr, destination, meta, compression=None)
+
+    assert caught.value is error
+    assert len(attempts) == expected_attempts
+    assert len(delays) == expected_attempts - 1
+    assert sum(delays) <= 7.75
+    assert destination.read_bytes() == b"previous output"
+    assert attempts[0].exists() == cleanup_fails
