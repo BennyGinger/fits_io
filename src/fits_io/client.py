@@ -111,7 +111,7 @@ class FitsIO:
         Returns the image data NumPy array and the axes string from the current reader, optionally applying a z-projection.
         
         Args:
-            z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
+            z_projection : Z-projection method to apply ('max', 'mean', 'sum', 'std', or None), by default None.
         
         Returns:
             ArrayResult : A dataclass containing the NumPy array and the axes string.
@@ -126,7 +126,7 @@ class FitsIO:
         
         Args:
             channel : Channel selector(s): int indices and/or str labels (all must be same type).
-            z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
+            z_projection : Z-projection method to apply ('max', 'mean', 'sum', 'std', or None), by default None.
         
         Returns:
             ArrayResult : A dataclass containing the NumPy array and the axes string.
@@ -148,7 +148,7 @@ class FitsIO:
         
         Args:
             img_reader : An ImageReader instance for the input image.
-            z_projection : The z-projection method to apply ('max', 'mean', or None). If None, no projection is applied.
+            z_projection : The z-projection method to apply ('max', 'mean', 'sum', 'std', or None). If None, no projection is applied.
             compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'.
         """
         path = apply_zproj(self.reader, z_projection, compression=compression)
@@ -326,7 +326,7 @@ class FitsIO:
             created_by : 
                 Optional string to set as the creator in the metadata (e.g. distributor). If None, it will use the current creator. By default None.
             z_projection : 
-                Z-projection method to apply ('max', 'mean', or None). If None, it will use the current z-projection. By default None.
+                Z-projection method to apply ('max', 'mean', 'sum', 'std', or None). If None, it will use the current z-projection. By default None.
             custom_metadata : 
                 Additional custom metadata to include in the TIFF file. If None, it will use the current custom metadata. By default None.
             metadata : 
@@ -380,7 +380,7 @@ class FitsIO:
             created_by : 
                 Optional string to set as the creator in the metadata (e.g. distributor), by default None.
             z_projection : 
-                Z-projection method to apply ('max', 'mean', or None), by default None.
+                Z-projection method to apply ('max', 'mean', 'sum', 'std', or None), by default None.
             custom_metadata :   
                 Additional custom metadata to include in the TIFF file, by default None.
             array_shape : 
@@ -508,7 +508,7 @@ class FitsIO:
         Resolve output axes string for ImageJ metadata based on the current reader's axes and provided parameters.
         
         Args:
-            z_projection : Z-projection method to apply ('max', 'mean', or None), by default None.
+            z_projection : Z-projection method to apply ('max', 'mean', 'sum', 'std', or None), by default None.
             n_channels : Optional number of channels to consider for output axes. If None, uses the current reader's channel count.
         
         Returns:

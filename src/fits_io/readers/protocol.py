@@ -135,7 +135,7 @@ class ImageReader(ABC):
         Args:
             arr: Input array.
             z_axis: Axis index for Z dimension.
-            zproj: Projection method ('max' or 'mean').
+            zproj: Projection method ('max', 'mean', 'sum', 'std', or None).
         
         Returns:
             Projected array with Z dimension removed.
@@ -147,6 +147,10 @@ class ImageReader(ABC):
             return np.max(arr, axis=z_axis)
         elif zproj == 'mean':
             return np.mean(arr, axis=z_axis)
+        elif zproj == 'sum':
+            return np.sum(arr, axis=z_axis)
+        elif zproj == 'std':
+            return np.std(arr, axis=z_axis)
         else:
             raise ValueError(f"Unsupported z-projection method: {zproj}")
         

@@ -49,6 +49,10 @@ def prepare_conversion(img_reader: ImageReader,
     array = img_reader.get_channel(channel=selection.export_indices, 
                                    z_projection=z_projection,)
     
+    # ImageJ TIFF supports float32, but not NumPy reduction float64/uint64.
+    if z_projection in {"mean", "sum", "std"} and "Z" in img_reader.axes:
+        array = array.astype(np.float32)
+
     output_path = build_output_path(img_reader, save_name=output_name)
     
     metadata = build_payload(img_reader,
@@ -152,7 +156,7 @@ def apply_zproj(img_reader: ImageReader,
     
     Args:
         img_reader : An ImageReader instance for the input image. Only reader from .tif is supported.
-        z_projection : The z-projection method to apply ('max', 'mean', or None). If None, no projection is applied.
+        z_projection : The z-projection method to apply ('max', 'mean', 'sum', 'std', or None). If None, no projection is applied.
         compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'.
     """
     if not isinstance(img_reader, TiffReader):

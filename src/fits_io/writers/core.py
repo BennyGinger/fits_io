@@ -39,7 +39,7 @@ def save_tiff(img_array: NDArray,
     """
     Save a NumPy array to a TIFF file with the specified metadata and compression.
     """
-    predictor = 2 if compression in {"zlib", "deflate", "lzma"} else None
+    predictor = 2 if compression in {"zlib", "deflate", "lzma"} and img_array.dtype.kind in "iu" else None
     logger.debug(f"compression={compression} predictor={predictor} dtype={img_array.dtype} shape={img_array.shape} size={img_array.size}")
     
     if img_array.size == 0:

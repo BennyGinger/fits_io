@@ -17,7 +17,7 @@ PixelDensity: TypeAlias = tuple[float, float]  # (x_pix_per_unit, y_pix_per_unit
 ExtTags = Literal['.tiff', '.tif', '.nd2']
 SUPPORTED_EXTENSIONS: set[ExtTags] = set(get_args(ExtTags))
 
-Zproj = Literal['max', 'mean', None]
+Zproj = Literal['max', 'mean', 'sum', 'std', None]
 
 _ALLOWED_AXIS = {'C', 'Z', 'T', 'X', 'Y'}
 
