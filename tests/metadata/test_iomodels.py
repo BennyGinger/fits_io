@@ -1,11 +1,19 @@
 import pytest
 
 from fits_io.metadata.imageJ_meta import InfoSummary
+from fits_io.metadata.models import ArtifactMeta
 from fits_io.metadata.tiff_meta import ChannelMeta, ResolutionMeta, StackMeta
 
 # -------------------------
 # StackMeta
 # -------------------------
+
+def test_artifact_meta_accepts_rgb_samples_axis() -> None:
+    """S denotes interleaved RGB samples, not microscopy channels."""
+    metadata = ArtifactMeta(axes="TCYXS")
+
+    assert metadata.axes == "TCYXS"
+
 
 def test_stackmeta_to_dict_with_interval():
     s = StackMeta(axes="TZCYX", finterval=11.0)

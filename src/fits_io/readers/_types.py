@@ -19,7 +19,12 @@ SUPPORTED_EXTENSIONS: set[ExtTags] = set(get_args(ExtTags))
 
 Zproj = Literal['max', 'mean', 'sum', 'std', None]
 
-_ALLOWED_AXIS = {'C', 'Z', 'T', 'X', 'Y', 'S'}
+# ``S`` is the TIFF samples-per-pixel axis used by interleaved RGB(A) data
+# (for example an array shaped ``(..., Y, X, 3)``).  It is intentionally
+# distinct from ``C``: C represents independently selectable microscopy
+# channels, while S represents the colour components of one rendered pixel.
+# FITS' tracking viewer relies on S when it exports its RGB mask/path display.
+_ALLOWED_AXIS = {'C', 'S', 'Z', 'T', 'X', 'Y'}
 
 def validate_axes(axes: str) -> None:
     """

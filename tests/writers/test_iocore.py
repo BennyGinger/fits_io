@@ -28,6 +28,23 @@ def test_save_tiff_raises_on_empty_array(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert called["n"] == 0
 
 
+def test_save_tiff_preserves_interleaved_rgb_samples_axis(tmp_path: Path) -> None:
+    """The final S axis describes RGB samples belonging to each pixel."""
+    from tifffile import TiffFile
+
+    array = np.zeros((2, 5, 6, 3), dtype=np.uint8)
+    metadata = SimpleNamespace(
+        imagej_meta={"axes": "TYXS"}, resolution=None, extratags=[])
+    output = tmp_path / "rendered_tracking_display.tif"
+
+    core.save_tiff(array, output, metadata, compression=None)  # type: ignore[arg-type]
+
+    with TiffFile(output) as tiff:
+        assert tiff.series[0].axes == "TYXS"
+        assert tiff.series[0].shape == array.shape
+        assert tiff.pages[0].photometric.name == "RGB"
+
+
 @pytest.mark.parametrize(
     "compression, expected_predictor",
     [
