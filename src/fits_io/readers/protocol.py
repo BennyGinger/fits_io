@@ -127,6 +127,16 @@ class ImageReader(ABC):
         """Return the selected channel(s) as a NumPy array or list of arrays. Channel can be specified by index or label."""
         ...
 
+    def get_plane(self, frame_index: int = 0, channel: int = 0,
+                  z_index: int = 0) -> NDArray[Any]:
+        """Read one YX plane without loading the complete movie."""
+        raise NotImplementedError("Plane reading is not supported by this reader.")
+
+    @property
+    def dtype(self) -> np.dtype:
+        """Return the pixel dtype from metadata, without loading pixels."""
+        raise NotImplementedError("Pixel dtype inspection is not supported by this reader.")
+
     @staticmethod
     def apply_zproj(arr: NDArray, z_axis: int | None, zproj: Zproj | None) -> NDArray:
         """
@@ -177,4 +187,3 @@ if __name__ == "__main__":
         arr = series.asarray()
     
     print(f"Array shape: {arr.shape}")
-    

@@ -145,6 +145,39 @@ class TiffReader(ImageReader):
         z_axis = z_axis if z_axis != -1 else None
         return self.apply_zproj(arr, z_axis=z_axis, zproj=z_projection)
 
+    @property
+    def dtype(self) -> np.dtype:
+        with TiffFile(self.img_path) as tif:
+            return np.dtype(tif.series[self.series_idx].dtype)
+
+    def get_plane(self, frame_index: int = 0, channel: int = 0,
+                  z_index: int = 0) -> NDArray[Any]:
+        """Decode only the TIFF page containing the requested YX plane."""
+        if self.axes.replace("T", "").replace("C", "").replace("Z", "") != "YX":
+            raise ValueError(f"Plane reading requires TCZ navigation axes and YX; got {self.axes!r}.")
+        positions = {"T": frame_index, "C": channel, "Z": z_index}
+        for axis, index in positions.items():
+            size = self.shape[self.axes.index(axis)] if axis in self.axes else 1
+            if index < 0 or index >= size:
+                raise IndexError(f"{axis} index {index} is outside 0..{size - 1}.")
+        with TiffFile(self.img_path) as tif:
+            series = tif.series[self.series_idx]
+            first_page = series.pages[0]
+            if first_page is None:
+                raise ValueError("TIFF series has no first page.")
+            page_ndim = len(first_page.shape)
+            leading_axes = self.axes[:-page_ndim]
+            page_index = (int(np.ravel_multi_index(
+                tuple(positions[axis] for axis in leading_axes),
+                self.shape[:-page_ndim])) if leading_axes else 0)
+            selected_page = series.pages[page_index]
+            if selected_page is None:
+                raise ValueError(f"TIFF series is missing page {page_index}.")
+            page = selected_page.asarray()
+            selection = tuple(positions.get(axis, slice(None))
+                              for axis in self.axes[-page_ndim:])
+            return np.asarray(page[selection])
+
     def get_channel(self, channel: int | Sequence[int], z_projection: Zproj = None) -> NDArray[Any]:
         c_list = self._normalize_channel_indices(channel)
         self._validate_channel_indices(c_list)

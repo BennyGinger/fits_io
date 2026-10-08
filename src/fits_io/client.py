@@ -118,6 +118,15 @@ class FitsIO:
         """
         array = self.reader.get_array(z_projection=z_projection)
         return ArrayResult(array=array, axes=self.reader.axes)
+
+    def get_plane(self, frame_index: int = 0, channel: int | str = 0,
+                  z_index: int = 0) -> ArrayResult:
+        """Return a single time/channel/Z plane with YX axes."""
+        positions = self.resolve_channel_positions(channel)
+        if len(positions) != 1:
+            raise ValueError("Plane reading requires exactly one channel.")
+        array = self.reader.get_plane(frame_index, positions[0], z_index)
+        return ArrayResult(array=array, axes="YX")
     
     
     def get_channel(self, channel: int | str | Sequence[int | str], z_projection: Zproj = None) -> ArrayResult:
@@ -564,4 +573,3 @@ class FitsIO:
             else:
                 raise TypeError(f"Expected int or str channel, got {type(ch).__name__}")
         return positions
-
