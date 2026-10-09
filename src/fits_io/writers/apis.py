@@ -72,7 +72,8 @@ def save_array(img_reader: ImageReader,
                *, 
                fitsio_metadata: FitsIOMeta,
                output_path: Path, 
-               compression: str | None = 'zlib', 
+               compression: str | None = 'zlib',
+               compressionargs: dict[str, Any] | None = None,
                ) -> Path:
     """
     Save the given array to a FITS TIFF file with ImageJ metadata.
@@ -102,7 +103,7 @@ def save_array(img_reader: ImageReader,
                                         img_reader.interval, 
                                         img_reader.resolution)
     
-    save_tiff(array, output_path, meta_write, compression=current_compression)
+    save_tiff(array, output_path, meta_write, compression=current_compression, compressionargs=compressionargs)
     return output_path
 
 

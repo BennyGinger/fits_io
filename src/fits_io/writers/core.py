@@ -2,6 +2,7 @@ import errno
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 import logging
 
 from numpy.typing import NDArray
@@ -34,7 +35,8 @@ def _replace_with_retry(source: Path, destination: Path) -> None:
 def save_tiff(img_array: NDArray, 
               save_path: Path, 
               metadata: TiffWriteMeta, 
-              compression: str | None = 'zlib'
+              compression: str | None = 'zlib',
+              *, compressionargs: dict[str, Any] | None = None
               ) -> None:
     """
     Save a NumPy array to a TIFF file with the specified metadata and compression.
@@ -57,7 +59,7 @@ def save_tiff(img_array: NDArray,
                 resolution=metadata.resolution,
                 predictor=predictor,
                 extratags=metadata.extratags,
-                compression=compression,)
+                compression=compression, compressionargs=compressionargs,)
         
         _replace_with_retry(tmp_path, save_path)
         logger.debug(f"Saved TIFF file at {save_path}")

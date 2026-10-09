@@ -315,9 +315,13 @@ class FitsIO:
                    output_name: str = DEFAULT_OUTPUT_NAME, 
                    output_path: Path | None = None,
                    compression: str | None = 'zlib',
+                   compressionargs: dict[str, Any] | None = None,
                    ) -> Path:
         """
         Save an array to a FITS TIFF.
+
+        ``compressionargs`` forwards codec options, such as ``{"level": 1}``
+        for faster lossless zlib writing.
 
         Policy:
             - By default, output metadata is built from the current reader and the
@@ -365,7 +369,7 @@ class FitsIO:
                           array,
                           fitsio_metadata=meta,
                           output_path=output_path,
-                          compression=compression,)
+                          compression=compression, compressionargs=compressionargs,)
     
     
     def build_payload(self,
