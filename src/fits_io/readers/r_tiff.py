@@ -31,6 +31,8 @@ class TiffReader(ImageReader):
     _resolution: PixelSize | None = field(init=False)
     _imageJ_meta: dict[str, Any] = field(init=False)
     _metadata: FitsIOMeta = field(init=False)
+    _plane_offsets: tuple[int, ...] = field(init=False, default=())
+    _plane_ndim: int = field(init=False, default=0)
     
     @classmethod
     def can_read(cls, path: Path) -> bool:
@@ -52,6 +54,19 @@ class TiffReader(ImageReader):
             
             meta = cast(TiffPage, series.pages[0]).tags.get(FITS_TAG)
             self._metadata = self._get_metadata_from_tags(meta)
+            
+            # Creating an address map for each image page in the series, once. 
+            # This allows quick access to the pages without reopening the file.
+            first_page = series.pages[0]
+            if (isinstance(first_page, TiffPage) and self._imageJ_meta
+                    and first_page.compression == COMPRESSION.ADOBE_DEFLATE):
+                offsets = tuple(page.offset if page is not None else 0
+                                for page in series.pages)
+                page_ndim = len(first_page.shape)
+                expected = int(np.prod(self.shape[:-page_ndim]))
+                if len(offsets) == expected and all(offset > 0 for offset in offsets):
+                    self._plane_offsets = offsets
+                    self._plane_ndim = page_ndim
     
     @property
     def has_series(self) -> bool:
@@ -141,47 +156,92 @@ class TiffReader(ImageReader):
             series = tif.series[self.series_idx]
             arr = series.asarray()
             
-        z_axis = self.axes.find('Z') 
-        z_axis = z_axis if z_axis != -1 else None
-        return self.apply_zproj(arr, z_axis=z_axis, zproj=z_projection)
+        return self._project_z(arr, self.axes, z_projection)
+
+    def _project_z(self, array: NDArray[Any],
+                   axes: str,
+                   z_projection: Zproj
+                   ) -> NDArray[Any]:
+        """
+        Project Z using the axes of the array actually being returned.
+        """
+        z_axis = axes.index("Z") if "Z" in axes else None
+        return self.apply_zproj(array, z_axis=z_axis, zproj=z_projection)
 
     @property
     def dtype(self) -> np.dtype:
         with TiffFile(self.img_path) as tif:
             return np.dtype(tif.series[self.series_idx].dtype)
 
-    def get_plane(self, frame_index: int = 0, channel: int = 0,
-                  z_index: int = 0) -> NDArray[Any]:
-        """Decode only the TIFF page containing the requested YX plane."""
-        if self.axes.replace("T", "").replace("C", "").replace("Z", "") != "YX":
-            raise ValueError(f"Plane reading requires TCZ navigation axes and YX; got {self.axes!r}.")
+    def get_plane(self, frame_index: int = 0,
+                  channel: int = 0,
+                  z_index: int = 0
+                  ) -> NDArray[Any]:
+        """
+        Get a specific YX plane from the TIFF image based on the provided frame, channel, and Z indices.
+        """
         positions = {"T": frame_index, "C": channel, "Z": z_index}
+        self._validate_plane_positions(positions)
+
+        with TiffFile(self.img_path) as tif:
+            page, page_ndim = self._read_plane_page(tif, positions)
+
+        # A TIFF page can contain navigation axes as well as YX pixels.
+        page_axes = self.axes[-page_ndim:]
+        selection = tuple(positions.get(axis, slice(None)) for axis in page_axes)
+        return np.asarray(page[selection])
+
+    def _validate_plane_positions(self, positions: dict[str, int]) -> None:
+        spatial_axes = "".join(axis for axis in self.axes if axis not in "TCZ")
+        if spatial_axes != "YX":
+            raise ValueError(f"Plane reading requires TCZ navigation axes and YX; got {self.axes!r}.")
         for axis, index in positions.items():
             size = self.shape[self.axes.index(axis)] if axis in self.axes else 1
             if index < 0 or index >= size:
                 raise IndexError(f"{axis} index {index} is outside 0..{size - 1}.")
-        with TiffFile(self.img_path) as tif:
+
+    def _read_plane_page(self, tif: TiffFile, positions: dict[str, int]) -> tuple[NDArray[Any], int]:
+        """
+        Read through the cached page index, or tifffile's series fallback.
+        """
+        series = None
+        if self._plane_offsets:
+            page_ndim = self._plane_ndim
+        else:
             series = tif.series[self.series_idx]
             first_page = series.pages[0]
             if first_page is None:
                 raise ValueError("TIFF series has no first page.")
             page_ndim = len(first_page.shape)
-            leading_axes = self.axes[:-page_ndim]
-            page_index = (int(np.ravel_multi_index(
-                tuple(positions[axis] for axis in leading_axes),
-                self.shape[:-page_ndim])) if leading_axes else 0)
+
+        # Axes outside a page determine which page contains the requested plane.
+        leading_axes = self.axes[:-page_ndim]
+        page_index = 0
+        if leading_axes:
+            page_position = tuple(positions[axis] for axis in leading_axes)
+            page_grid_shape = self.shape[:-page_ndim]
+            page_index = int(np.ravel_multi_index(page_position, page_grid_shape))
+
+        if series is None:
+            page_offset = self._plane_offsets[page_index]
+            tif.filehandle.seek(page_offset)
+            selected_page = TiffPage(tif, index=page_index)
+        else:
             selected_page = series.pages[page_index]
             if selected_page is None:
                 raise ValueError(f"TIFF series is missing page {page_index}.")
-            page = selected_page.asarray()
-            selection = tuple(positions.get(axis, slice(None))
-                              for axis in self.axes[-page_ndim:])
-            return np.asarray(page[selection])
+        return selected_page.asarray(), page_ndim
 
     def get_channel(self, channel: int | Sequence[int], z_projection: Zproj = None) -> NDArray[Any]:
+        """
+        Get the specified channel(s) from the TIFF image, optionally applying a Z projection.
+        """
         c_list = self._normalize_channel_indices(channel)
         self._validate_channel_indices(c_list)
-        
+        if "C" not in self.axes:
+            # Channel zero is the entire image when no channel axis exists.
+            return self.get_array(z_projection=z_projection)
+
         with TiffFile(self.img_path) as tif:
             if not (0 <= self.series_idx < len(tif.series)):
                 raise IndexError(f"series_index {self.series_idx} out of range (0..{len(tif.series) - 1})")
@@ -190,17 +250,6 @@ class TiffReader(ImageReader):
             axes = s.axes
             shape = s.shape
             
-            c_axis = axes.find("C")
-            c_axis = c_axis if c_axis != -1 else None
-
-            if c_axis is None:
-                if len(c_list) == 1 and c_list[0] == 0:
-                    arr = s.asarray()
-                    z_axis = axes.find("Z")
-                    z_axis = z_axis if z_axis != -1 else None
-                    return self.apply_zproj(arr, z_axis=z_axis, zproj=z_projection)
-                raise ValueError(f"No 'C' axis in TIFF axes={axes!r}")
-
             page_axes = [ax for ax in axes if ax not in ("Y", "X")]
             page_shape = [shape[axes.index(ax)] for ax in page_axes]
 
@@ -233,9 +282,7 @@ class TiffReader(ImageReader):
             # If only one channel is selected, drop the C axis from the output
             axes_after = self.axes.replace('C', '')
         
-        z_axis = axes_after.find('Z')
-        z_axis = z_axis if z_axis != -1 else None
-        return self.apply_zproj(chan_arr, z_axis=z_axis, zproj=z_projection)
+        return self._project_z(chan_arr, axes_after, z_projection)
     
 
     

@@ -48,3 +48,24 @@ def test_imagej_hyperstack_plane_reading(tmp_path):
     tifffile.imwrite(path, array, imagej=True, metadata={"axes": "TZCYX"})
     np.testing.assert_array_equal(FitsIO.from_path(path).get_plane(2, 1, 3).array,
                                   array[2, 3, 1])
+
+
+def test_compressed_imagej_reuses_page_index(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    path = tmp_path / "compressed.tif"
+    array = np.arange(5 * 3 * 2 * 8 * 9, dtype=np.uint16).reshape(5, 3, 2, 8, 9)
+    tifffile.imwrite(path, array, imagej=True, compression="zlib",
+                     metadata={"axes": "TZCYX"})
+    reader = TiffReader(path)
+    assert len(reader._plane_offsets) == 30
+
+    def fail_series(_self):
+        pytest.fail("Rebuilt whole-stack metadata for a single plane")
+
+    monkeypatch.setattr(tifffile.TiffFile, "series", property(fail_series))
+    selections = [(0, 0, 0), (2, 1, 1), (4, 1, 2)]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        planes = list(pool.map(lambda selection: reader.get_plane(*selection), selections))
+    for (frame, channel, z), plane in zip(selections, planes):
+        np.testing.assert_array_equal(plane, array[frame, z, channel])
