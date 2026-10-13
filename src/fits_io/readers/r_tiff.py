@@ -85,6 +85,11 @@ class TiffReader(ImageReader):
     @property
     def shape(self) -> tuple[int, ...]:
         return self._shape
+
+    @property
+    def imagej_metadata(self) -> dict[str, Any]:
+        """Return ImageJ calibration/display metadata without exposing mutable state."""
+        return dict(self._imageJ_meta)
     
     @property
     def axes(self) -> str:

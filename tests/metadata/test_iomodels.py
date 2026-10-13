@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 
 from fits_io.metadata.imageJ_meta import InfoSummary
@@ -74,10 +75,13 @@ def test_channelmeta_color_mode_when_all_labels_map_to_rgb():
     assert cm.luts[1].shape == (3, 256)
 
 
-def test_channelmeta_grayscale_when_any_label_unknown():
+def test_channelmeta_retains_known_colors_when_another_label_is_unknown():
     cm = ChannelMeta(channel_number=2, labels=["GFP", "weird_dye"])
-    assert cm.mode == "grayscale"
-    assert cm.luts is None
+    assert cm.mode == "color"
+    assert cm.luts is not None
+    np.testing.assert_array_equal(cm.luts[0][1], np.arange(256, dtype=np.uint8))
+    assert not cm.luts[0][0].any() and not cm.luts[0][2].any()
+    np.testing.assert_array_equal(cm.luts[1], np.tile(np.arange(256, dtype=np.uint8), (3, 1)))
 
 
 def test_channelmeta_to_dict_includes_luts_only_when_present():

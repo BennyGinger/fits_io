@@ -316,12 +316,23 @@ class FitsIO:
                    output_path: Path | None = None,
                    compression: str | None = 'zlib',
                    compressionargs: dict[str, Any] | None = None,
+                   imagej_overlays: Sequence[bytes] | None = None,
+                   crop_xy: tuple[int, int, int, int] | None = None,
                    ) -> Path:
         """
         Save an array to a FITS TIFF.
 
         ``compressionargs`` forwards codec options, such as ``{"level": 1}``
         for faster lossless zlib writing.
+
+        ``imagej_overlays`` embeds serialized ImageJ ROIs in the TIFF header,
+        independently of the image pixels and FITS metadata.
+        Use ``compression="none"`` for overlay hyperstacks opened natively by
+        ImageJ; its compressed-stack reader may omit the overlay.
+
+        ``crop_xy=(x0, y0, x1, y1)`` applies an exclusive XY crop across all
+        other dimensions and records its bounds in technical metadata.
+        Supplied overlays must already use the cropped image coordinates.
 
         Policy:
             - By default, output metadata is built from the current reader and the
@@ -369,7 +380,8 @@ class FitsIO:
                           array,
                           fitsio_metadata=meta,
                           output_path=output_path,
-                          compression=compression, compressionargs=compressionargs,)
+                          compression=compression, compressionargs=compressionargs,
+                          imagej_overlays=imagej_overlays, crop_xy=crop_xy,)
     
     
     def build_payload(self,

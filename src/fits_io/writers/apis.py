@@ -16,6 +16,7 @@ from fits_io.metadata.resolve import move_or_add_channel_axis, resolve_channel_s
 from fits_io.metadata.payload import assemble_payload, build_payload
 from fits_io.writers.models import ChannelMergeResult, ConversionPreparation, ChannelSelection
 from fits_io.writers.core import save_tiff
+from fits_io.writers.crop import crop_array_xy
 from fits_io.writers.filesystem import build_output_path
 
 
@@ -74,6 +75,8 @@ def save_array(img_reader: ImageReader,
                output_path: Path, 
                compression: str | None = 'zlib',
                compressionargs: dict[str, Any] | None = None,
+               imagej_overlays: Sequence[bytes] | None = None,
+               crop_xy: tuple[int, int, int, int] | None = None,
                ) -> Path:
     """
     Save the given array to a FITS TIFF file with ImageJ metadata.
@@ -99,9 +102,28 @@ def save_array(img_reader: ImageReader,
     else:
         current_compression = compression
 
+    if crop_xy is not None:
+        axes = fitsio_metadata.fits_io.axes or img_reader.axes
+        source_shape = list(array.shape)
+        array = crop_array_xy(array, axes, crop_xy)
+        crops = list(fitsio_metadata.custom_metadata.get("spatial_crops", []))
+        crops.append({"source_axes": axes, "source_shape": source_shape,
+                      "bounds_xy": [int(value) for value in crop_xy],
+                      "offset_xy": [int(value) for value in crop_xy[:2]]})
+        fitsio_metadata = fitsio_metadata.with_custom_metadata({"spatial_crops": crops})
     meta_write = assemble_tiff_metadata(fitsio_metadata, 
                                         img_reader.interval, 
                                         img_reader.resolution)
+    if crop_xy is not None:
+        # Retain TIFF calibration, with origins expressed in the cropped coordinates.
+        source_meta = getattr(img_reader, "imagej_metadata", {})
+        for key in ("spacing", "unit", "tunit", "finterval", "fps", "zorigin"):
+            if key in source_meta:
+                meta_write.imagej_meta[key] = source_meta[key]
+        meta_write.imagej_meta["xorigin"] = float(source_meta.get("xorigin", 0)) - crop_xy[0]
+        meta_write.imagej_meta["yorigin"] = float(source_meta.get("yorigin", 0)) - crop_xy[1]
+    if imagej_overlays:
+        meta_write.imagej_meta["Overlays"] = list(imagej_overlays)
     
     save_tiff(array, output_path, meta_write, compression=current_compression, compressionargs=compressionargs)
     return output_path

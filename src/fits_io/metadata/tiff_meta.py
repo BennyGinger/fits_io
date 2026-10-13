@@ -72,11 +72,13 @@ class ChannelMeta:
         if len(self.labels) != self.channel_number:
             raise ValueError(f"Expected {self.channel_number} labels, got {len(self.labels)}")
         
-        colors = [LABEL_TO_COLOR.get(lbl.lower(), None) for lbl in self.labels]
-        if any(c not in COLOR_MAP for c in colors):
+        colors = [LABEL_TO_COLOR.get(lbl.strip().lower(), None) for lbl in self.labels]
+        if not any(c in COLOR_MAP for c in colors):
             self.mode, self.luts = 'grayscale', None
         else:
-            self.mode, self.luts = 'color', [make_color_lut(c) for c in colors if c is not None]
+            self.mode = 'color'
+            self.luts = [make_color_lut(c if c is not None and c in COLOR_MAP else "gray")
+                         for c in colors]
     
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any]=  {}
@@ -115,7 +117,12 @@ def assemble_tiff_metadata(payload: FitsIOMeta, interval: float | None, resoluti
     imagej_meta.update(channel_meta.to_dict())
     imagej_meta.update(resolution_meta.to_dict())
 
-    extratags = encode_metadata(payload.dump())
+    extratags = list(encode_metadata(payload.dump()) or [])
+    if channel_meta.luts is not None and channel_meta.channel_number == 1 and "S" not in stack_meta.axes:
+        # ImageJ's single-channel opener reads TIFF ColorMap rather than the
+        # hyperstack LUTs field. This display tag leaves the raw pixels intact.
+        colormap = channel_meta.luts[0].astype(np.uint16) * 257
+        extratags.append((320, "H", colormap.size, colormap.ravel(), True))
 
     return TiffWriteMeta(imagej_meta=imagej_meta,
                         resolution=resolution_meta.resolution,

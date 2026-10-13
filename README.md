@@ -20,6 +20,20 @@ conversion preparation, and artifact saving. Channel labels are always tied to
 their original source indices so that derived files remain traceable even when
 only a subset of channels is exported.
 
+Channel labels determine ImageJ LUT colours, for example GFP is green and DAPI
+is blue. Unrecognised labels use grayscale without suppressing known colours
+in other channels. Single-channel TIFFs also carry a TIFF colour map so ImageJ
+restores their LUT when opening them, including files with embedded overlays.
+
+`save_array(..., crop_xy=(x0, y0, x1, y1))` applies an exclusive XY pixel crop
+across every other dimension, using the array's axes metadata. It preserves
+channel identity, FITS/custom metadata, pixel calibration, and timing, and adds
+the source shape, bounds, and offset to `spatial_crops` metadata. ImageJ spatial
+origins are adjusted for the crop. Serialized annotations can be supplied with
+`imagej_overlays`; the caller must first clip/shift them into crop coordinates.
+Use `compression="none"` for overlay hyperstacks opened with ImageJ's native
+TIFF opener.
+
 ## Role in FITS
 
 FITS decides which artifact a workflow step requires and where its result
