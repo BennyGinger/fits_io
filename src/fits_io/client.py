@@ -90,7 +90,11 @@ class FitsIO:
         return self.metadata.fits_io.source_channel_indices
   
     
-    def set_channel_labels(self, channel_labels: str | Sequence[str], compression: str | None = 'zlib') -> None:
+    def set_channel_labels(self, 
+                           channel_labels: str | Sequence[str], 
+                           compression: str | None = None,
+                           custom_metadata: Mapping[str, Any] | None = None
+                           ) -> None:
         """
         Set the channel labels in the metadata.
         
@@ -100,9 +104,13 @@ class FitsIO:
         
         Args:
             channel_labels : New channel labels to set, either a single string for one channel or a sequence of strings for multiple channels.
-            compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'.
+            compression : Compression method to use for the TIFF file. By default,
+                retain the source TIFF's compression.
+            custom_metadata : Optional updated FITS metadata; existing values
+                are retained when omitted.
         """
-        path = set_channel_labels(self.reader, channel_labels, compression=compression)
+        path = set_channel_labels(self.reader, channel_labels, compression=compression,
+                                  custom_metadata=custom_metadata)
         self.reader = get_reader(path)  # Reload the reader to reflect updated metadata.
     
     

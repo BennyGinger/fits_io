@@ -91,7 +91,7 @@ def save_array(img_reader: ImageReader,
         array : The NumPy array to save.
         output_path : The path of the output TIFF file.
         fitsio_metadata : The FitsIOMeta object containing the metadata to write to the output file.
-        compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'.
+        compression : Compression method to use for the TIFF file. Defaults to zlib.
     
     Returns:
         Path: The path of the saved TIFF file.
@@ -131,7 +131,8 @@ def save_array(img_reader: ImageReader,
 
 def set_channel_labels(img_reader: ImageReader, 
                        channel_labels: str | Sequence[str], 
-                       compression: str | None = 'zlib',
+                       compression: str | None = None,
+                       custom_metadata: Mapping[str, Any] | None = None,
                        ) -> Path:
     """
     Set the channel labels in the metadata.
@@ -144,7 +145,10 @@ def set_channel_labels(img_reader: ImageReader,
     Args:
         img_reader : An ImageReader instance for the input image. Only reader from .tif is supported.
         channel_labels : New channel labels to set, either a single string for one channel or a sequence of strings for multiple channels.
-        compression : Compression method to use for the TIFF file. If None, no compression is applied, by default 'zlib'.
+        compression : Compression method to use for the TIFF file. By default,
+            retain the source TIFF's compression.
+        custom_metadata : Optional updated FITS metadata; existing values are
+            retained when omitted.
     """
     if not isinstance(img_reader, TiffReader):
         raise TypeError("set_channel_labels only supports .tif/.tiff files.")
@@ -155,14 +159,21 @@ def set_channel_labels(img_reader: ImageReader,
     
     # Get existing metadata to preserve other fields
     meta = assemble_payload(img_reader.metadata,
-                         channel_labels=selection.export_labels,)
+                         channel_labels=selection.export_labels,
+                         custom_metadata=custom_metadata)
     meta_write = assemble_tiff_metadata(meta, 
                                         img_reader.interval, 
                                         img_reader.resolution)
+    # A label change must not discard ImageJ display state, especially the
+    # independent ROI overlays written by the tracking viewer.
+    for key, value in getattr(img_reader, "imagej_metadata", {}).items():
+        if key not in {"Info", "Labels", "mode", "LUTs", "axes"}:
+            meta_write.imagej_meta[key] = value
     
     # Get array to save (no z-projection applied here)
     array = img_reader.get_array()
-    save_tiff(array, img_reader.img_path, meta_write, compression=compression)
+    save_tiff(array, img_reader.img_path, meta_write,
+              compression=img_reader.compression_method if compression is None else compression)
     return img_reader.img_path 
 
 
@@ -246,12 +257,3 @@ def merge_channel_arrays(*,
             *new_channel_indices,
         ],
     )
-
-
-
-
-
-
-    
-
-    
