@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Generic, TypeVar, TYPE_CHECKING
 
-from numpy.typing import NDArray
+from numpy.typing import DTypeLike, NDArray
 import numpy as np
 
 if TYPE_CHECKING:
@@ -91,15 +91,16 @@ class ChannelSubset(Generic[T]):
         return tuple(source_indices[position]
                      for position in self.channel_positions)
     
-    def rebuild(self, processed_array: NDArray[T]) -> NDArray[T]:
+    def rebuild(self, processed_array: NDArray[T], *, dtype: DTypeLike | None = None) -> NDArray[Any]:
+        """Restore excluded channels, optionally converting the whole output dtype."""
         if processed_array.shape != self.array.shape:
             raise ValueError("Processed array shape does not match the selected input: "
                              f"expected {self.array.shape}, got {processed_array.shape}.")
 
         if self.is_full_array:
-            return processed_array
+            return processed_array if dtype is None else processed_array.astype(dtype, copy=False)
 
-        return self.reader.replace_channels(self.channel_positions, processed_array,)
+        return self.reader.replace_channels(self.channel_positions, processed_array, dtype=dtype)
     
 
 @dataclass(slots=True, frozen=True)

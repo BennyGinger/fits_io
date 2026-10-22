@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 from collections.abc import  Mapping, Sequence
 
-from numpy.typing import NDArray
+from numpy.typing import DTypeLike, NDArray
 import numpy as np
 
 from fits_io.metadata.models import FitsIOMeta
@@ -473,14 +473,15 @@ class FitsIO:
 
     def replace_channels(self,
                          channel: int | str | Sequence[int | str],
-                         replacement: NDArray[Any],
+                         replacement: NDArray[Any], *,
+                         dtype: DTypeLike | None = None,
                          ) -> NDArray[Any]:
         """
-        Return the complete array with selected channels replaced.
+        Return selected-channel replacements, optionally using an explicit output dtype.
         """
         chan_positions = self.resolve_channel_positions(channel)
         result = self.get_array()
-        output = result.array
+        output = result.array if dtype is None else result.array.astype(dtype, copy=True)
         
         channel_axis = self.axes.index("C")
         # Add a channel axis to the replacement if it is a single channel (missing C axis)
