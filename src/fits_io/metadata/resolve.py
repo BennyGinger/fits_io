@@ -99,9 +99,23 @@ def move_or_add_channel_axis(*,
         return array
 
     return np.moveaxis(array, current_position, target_position)
+def channel_label_warning(n_channels: int, label_count: int) -> str:
+    """
+    Describe a label-count mismatch and the exact default labels conversion will use.
+    """
+    if label_count == n_channels:
+        return ""
+    defaults = ", ".join(f"C_{index + 1}" for index in range(n_channels))
+    return (f"Expected {n_channels} channels, got {label_count} channel labels. "
+            f"If unresolved, conversion will use default names: {defaults}.")
+
+
 ############ Private helper functions ###########################
 
 def _resolve_channel_labels(channel_labels: str | Sequence[str] | None, n_channels: int) -> list[str]:
+    """
+    Use supplied labels when their count matches, otherwise warn and use default names.
+    """
     if channel_labels is None:
         return [f"C_{i+1}" for i in range(n_channels)]
     
@@ -117,7 +131,7 @@ def _resolve_channel_labels(channel_labels: str | Sequence[str] | None, n_channe
     _ensure_unique(labels, name="channel_labels")
     
     if len(labels) != n_channels:
-        logger.warning(f"Number of channel labels {len(labels)} does not match number of channels {n_channels}. Revert to default labels.")
+        logger.warning(channel_label_warning(n_channels, len(labels)))
         return [f"C_{i+1}" for i in range(n_channels)]
     
     return labels
