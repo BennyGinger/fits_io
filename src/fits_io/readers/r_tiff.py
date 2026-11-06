@@ -90,6 +90,29 @@ class TiffReader(ImageReader):
     def imagej_metadata(self) -> dict[str, Any]:
         """Return ImageJ calibration/display metadata without exposing mutable state."""
         return dict(self._imageJ_meta)
+
+    @property
+    def channel_colors(self) -> list[str | None] | None:
+        """
+        Return terminal RGB colors from cached ImageJ channel LUTs without reading pixels.
+        """
+        raw_luts = self._imageJ_meta.get("LUTs")
+        if raw_luts is None or self.series_idx != 0:
+            return None
+        try:
+            luts = np.asarray(raw_luts)
+        except (TypeError, ValueError):
+            return None
+        if luts.ndim == 2:
+            luts = luts[np.newaxis]
+        if luts.shape != (self.channel_count, 3, 256) or luts.dtype.kind not in "ui":
+            return None
+        colors: list[str | None] = []
+        for lut in luts:
+            red, green, blue = (int(value) for value in lut[:, -1])
+            valid = bool(np.all((lut >= 0) & (lut <= 255)))
+            colors.append(f"#{red:02x}{green:02x}{blue:02x}" if valid and (red or green or blue) else None)
+        return colors
     
     @property
     def axes(self) -> str:
@@ -195,15 +218,6 @@ class TiffReader(ImageReader):
         page_axes = self.axes[-page_ndim:]
         selection = tuple(positions.get(axis, slice(None)) for axis in page_axes)
         return np.asarray(page[selection])
-
-    def _validate_plane_positions(self, positions: dict[str, int]) -> None:
-        spatial_axes = "".join(axis for axis in self.axes if axis not in "TCZ")
-        if spatial_axes != "YX":
-            raise ValueError(f"Plane reading requires TCZ navigation axes and YX; got {self.axes!r}.")
-        for axis, index in positions.items():
-            size = self.shape[self.axes.index(axis)] if axis in self.axes else 1
-            if index < 0 or index >= size:
-                raise IndexError(f"{axis} index {index} is outside 0..{size - 1}.")
 
     def _read_plane_page(self, tif: TiffFile, positions: dict[str, int]) -> tuple[NDArray[Any], int]:
         """

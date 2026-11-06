@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 from typing import Any, TypeVar
 from collections.abc import Mapping, Sequence
 from numpy.typing import DTypeLike, NDArray
@@ -8,7 +9,8 @@ import numpy as np
 from fits_io.metadata.provenance import input_reference
 from fits_io.metadata.models import FitsIOMeta
 from fits_io.metadata.payload import build_payload
-from fits_io.metadata.resolve import resolve_channel_selection, resolve_output_axes
+from fits_io.metadata.resolve import channel_label_warning, resolve_channel_selection, resolve_output_axes
+from fits_io.metadata.channel_colors import conversion_channel_labels
 from fits_io.readers.protocol import ImageReader
 from fits_io.readers._types import Zproj
 from fits_io.readers.factory import get_reader
@@ -35,11 +37,11 @@ class FitsIO:
 
 
     @classmethod
-    def from_path(cls, path: str | Path) -> FitsIO:
+    def from_path(cls, path: str | Path, *, series_idx: int = 0) -> FitsIO:
         """
         Open a supported image through the reader factory.
         """
-        reader = get_reader(path)
+        reader = get_reader(path, series_idx=series_idx)
         return cls(reader)
 
 
@@ -79,6 +81,13 @@ class FitsIO:
         Return the frame interval in seconds.
         """
         return self.reader.interval
+
+    @property
+    def channel_colors(self) -> list[str | None] | None:
+        """
+        Return source display colors independently of label-derived output LUTs.
+        """
+        return self.reader.channel_colors
 
 
     @property
@@ -257,6 +266,7 @@ class FitsIO:
                                   *,
                                   channel_labels: str | Sequence[str] | None = None,
                                   export_channels: str | Sequence[str] = 'all',
+                                  channel_colors: Sequence[str | None] | None = None,
                                   ) -> ChannelSelection:
         """
         Resolve channel indices and labels from the provided channel selector(s) and export channels. To ensure that updated metadata is saved in the output file, this function should be called before ``convert_to_fits`` or ``save_array``.
@@ -264,11 +274,17 @@ class FitsIO:
         Args:
             channel_labels : Optional labels for source channels (used for mapping), if None, default labels will be used. 
             export_channels : Subset channels to export. Can be 'all' or a list of channel labels, by default 'all'.
+            channel_colors : Optional shared source palette; by default use this reader's source colors.
 
         Returns:
             ChannelSelection : A dataclass containing the resolved channel indices and labels for export.
         """
-        return resolve_channel_selection(channel_labels=channel_labels,
+        colors = self.channel_colors if channel_colors is None else channel_colors
+        labels = conversion_channel_labels(channel_labels, self.reader.channel_count, colors)
+        supplied = [channel_labels] if isinstance(channel_labels, str) else channel_labels
+        if supplied and len(supplied) != self.reader.channel_count:
+            logging.getLogger(__name__).warning(channel_label_warning(self.reader.channel_count, len(supplied), labels))
+        return resolve_channel_selection(channel_labels=labels,
                                          n_channels=self.reader.channel_count,
                                          export_channels=export_channels,
                                          )

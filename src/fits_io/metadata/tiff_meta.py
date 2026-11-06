@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 
 from fits_io.readers._types import ExtraTags, PixelDensity, PixelSize
 from fits_io.metadata.models import FitsIOMeta
-from fits_io.metadata.imageJ_meta import InfoSummary, LABEL_TO_COLOR, COLOR_MAP, make_color_lut
+from fits_io.metadata.imageJ_meta import InfoSummary, COLOR_MAP, label_display_color, make_color_lut
 from fits_io.metadata.codec import encode_metadata
 
 
@@ -72,7 +72,7 @@ class ChannelMeta:
         if len(self.labels) != self.channel_number:
             raise ValueError(f"Expected {self.channel_number} labels, got {len(self.labels)}")
         
-        colors = [LABEL_TO_COLOR.get(lbl.strip().lower(), None) for lbl in self.labels]
+        colors = [label_display_color(lbl) for lbl in self.labels]
         if not any(c in COLOR_MAP for c in colors):
             self.mode, self.luts = 'grayscale', None
         else:

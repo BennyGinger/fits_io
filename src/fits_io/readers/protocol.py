@@ -132,6 +132,25 @@ class ImageReader(ABC):
         """Read one YX plane without loading the complete movie."""
         raise NotImplementedError("Plane reading is not supported by this reader.")
 
+    def _validate_plane_positions(self, positions: dict[str, int]) -> None:
+        """
+        Require a YX plane and valid indices for optional navigation axes.
+        """
+        spatial_axes = "".join(axis for axis in self.axes if axis not in "TCZ")
+        if spatial_axes != "YX":
+            raise ValueError(f"Plane reading requires TCZ navigation axes and YX; got {self.axes!r}.")
+        for axis, index in positions.items():
+            size = self.shape[self.axes.index(axis)] if axis in self.axes else 1
+            if index < 0 or index >= size:
+                raise IndexError(f"{axis} index {index} is outside 0..{size - 1}.")
+
+    @property
+    def channel_colors(self) -> list[str | None] | None:
+        """
+        Return source display colors as RGB hex strings, or None when unavailable.
+        """
+        return None
+
     @property
     def dtype(self) -> np.dtype:
         """Return the pixel dtype from metadata, without loading pixels."""

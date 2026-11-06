@@ -81,6 +81,25 @@ class Nd2Reader(ImageReader):
     @property
     def channel_count(self) -> int:
         return self._sizes.get("C", 1)
+
+    @property
+    def channel_colors(self) -> list[str | None] | None:
+        """
+        Return NIS uiColor values in channel order; reject ambiguous metadata and black colors.
+        """
+        if self._channels is None or len(self._channels) != self.channel_count:
+            return None
+        colors: list[str | None] = []
+        for entry in self._channels:
+            channel = getattr(entry, "channel", None)
+            color = getattr(channel, "color", None)
+            if color is None:
+                colors.append(None)
+                continue
+            rgb = (color.r, color.g, color.b)
+            valid = all(isinstance(value, int) and 0 <= value <= 255 for value in rgb)
+            colors.append(color.as_hex() if valid and any(rgb) else None)
+        return colors
     
     @property
     def resolution(self) -> PixelSize | None:
@@ -137,6 +156,33 @@ class Nd2Reader(ImageReader):
         # Remove the P axis by selecting the series index
         arr: NDArray[Any] = np.take(arr, indices=self.series_idx, axis=p_axis)
         return self.apply_zproj(arr, z_axis=z_axis, zproj=z_projection)
+
+    @property
+    def dtype(self) -> np.dtype:
+        """
+        Read the pixel dtype from the ND2 header without loading pixels.
+        """
+        with nd2.ND2File(self.img_path) as file:
+            return np.dtype(file.dtype)
+
+    def get_plane(self, frame_index: int = 0, channel: int = 0, z_index: int = 0) -> NDArray[Any]:
+        """
+        Read one acquisition frame at T/P/Z and return an independent YX channel plane.
+        """
+        positions = {"T": frame_index, "C": channel, "Z": z_index}
+        self._validate_plane_positions(positions)
+        if not 0 <= self.series_idx < self.series_count:
+            raise IndexError(f"Series index {self.series_idx} is outside 0..{self.series_count - 1}.")
+        positions["P"] = self.series_idx
+        sequence_index = 0
+        for axis, size in self._sizes.items():
+            if axis in "TPZ":
+                sequence_index = sequence_index * size + positions[axis]
+        with nd2.ND2File(self.img_path) as file:
+            frame = file.read_frame(sequence_index)
+            # Restore CYX after nd2 squeezes singletons; copy before its memory map closes.
+            channels = np.asarray(frame).reshape(self.channel_count, self._sizes.get("Y", 1), self._sizes.get("X", 1))
+            return channels[channel].copy()
     
     def get_channel(self, channel: int | Sequence[int], z_projection: Zproj = None) -> NDArray[Any]:
         idxs = self._normalize_channel_indices(channel)

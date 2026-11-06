@@ -99,13 +99,16 @@ def move_or_add_channel_axis(*,
         return array
 
     return np.moveaxis(array, current_position, target_position)
-def channel_label_warning(n_channels: int, label_count: int) -> str:
+def channel_label_warning(n_channels: int, label_count: int,
+                          default_labels: Sequence[str] | None = None,
+                          ) -> str:
     """
     Describe a label-count mismatch and the exact default labels conversion will use.
     """
     if label_count == n_channels:
         return ""
-    defaults = ", ".join(f"C_{index + 1}" for index in range(n_channels))
+    defaults = ", ".join(default_labels if default_labels is not None
+                         else [f"C_{index + 1}" for index in range(n_channels)])
     return (f"Expected {n_channels} channels, got {label_count} channel labels. "
             f"If unresolved, conversion will use default names: {defaults}.")
 

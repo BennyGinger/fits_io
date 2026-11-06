@@ -29,7 +29,7 @@ READER_BY_SUFFIX: dict[str, Type[ImageReader]] = {
 }
 
 
-def get_reader(path: str | Path) -> ImageReader:
+def get_reader(path: str | Path, *, series_idx: int = 0) -> ImageReader:
     """
     Return an ImageReader instance for the given path, based on suffix.
     """
@@ -47,7 +47,7 @@ def get_reader(path: str | Path) -> ImageReader:
         raise UnsupportedFileTypeError(
             f"Unsupported file type: {suffix!r}. Supported: {supported}") from e
 
-    return reader_cls(p)
+    return reader_cls(p, series_idx=series_idx)
 
 
 
@@ -91,5 +91,3 @@ if __name__ == "__main__":
 
         # example: take channel 0
         # (axis order depends on the file)
-        
-    

@@ -50,6 +50,20 @@ LABEL_TO_COLOR = {
 }
 
 
+def label_display_color(label: str) -> str | None:
+    """
+    Resolve a label color, including numbered color defaults such as green_1.
+    """
+    normalized = label.strip().lower()
+    if normalized in LABEL_TO_COLOR:
+        return LABEL_TO_COLOR[normalized]
+    base, separator, suffix = normalized.rpartition("_")
+    color = base if separator and suffix.isdecimal() else normalized
+    if color == "white":
+        return "gray"
+    return color if color in COLOR_MAP else None
+
+
 @dataclass(slots=True, frozen=True)
 class InfoSummary:
     payload: Mapping[str, Any] | None
@@ -226,4 +240,4 @@ def make_color_lut(color: str) -> NDArray[np.uint8]:
     except KeyError:
         raise ValueError(f"Unsupported LUT color: {color}")
 
-    return mask * np.arange(256, dtype=np.uint8)   
+    return mask * np.arange(256, dtype=np.uint8)
